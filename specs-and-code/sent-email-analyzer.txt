@@ -1,0 +1,279 @@
+# File: chief_of_staff_ai/processors/sent_email_analyzer.py
+"""
+Sent Email Contact Extractor
+============================
+Builds trusted contact database from sent emails
+"""
+
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Set, Tuple
+from collections import defaultdict
+from email.utils import parseaddr
+
+from googleapiclient.discovery import build
+from auth.gmail_auth import gmail_auth
+from models.database import get_db_manager, User
+
+logger = logging.getLogger(__name__)
+
+class SentEmailAnalyzer:
+    """Extract and analyze contacts from sent emails"""
+    
+    def __init__(self):
+        self.version = "1.0"
+        
+    def extract_sent_contacts(self, user_email: str, days_back: int = 180) -> Dict:
+        """
+        Extract contacts from sent emails to build trusted contact database
+        
+        This is Phase 1 of the contact strategy - finding who the user
+        actually communicates with by analyzing their sent folder.
+        """
+        try:
+            # Get user
+            user = get_db_manager().get_user_by_email(user_email)
+            if not user:
+                return {'success': False, 'error': 'User not found'}
+            
+            # Get Gmail credentials
+            credentials = gmail_auth.get_valid_credentials(user_email)
+            if not credentials:
+                return {'success': False, 'error': 'No valid Gmail credentials'}
+            
+            service = build('gmail', 'v1', credentials=credentials)
+            
+            # Query specifically for sent emails
+            since_date = (datetime.utcnow() - timedelta(days=days_back)).strftime('%Y/%m/%d')
+            query = f"in:sent after:{since_date}"
+            
+            logger.info(f"Fetching sent emails for {user_email} with query: {query}")
+            
+            # Fetch sent emails
+            sent_emails = self._fetch_sent_emails(service, query, limit=500)
+            
+            if not sent_emails:
+                return {
+                    'success': True,
+                    'message': 'No sent emails found',
+                    'contacts_found': 0
+                }
+            
+            # Extract recipients from sent emails
+            contact_map = self._extract_recipients_from_sent(sent_emails, service)
+            
+            # Save as trusted contacts
+            saved_count = self._save_trusted_contacts(user.id, contact_map)
+            
+            return {
+                'success': True,
+                'sent_emails_analyzed': len(sent_emails),
+                'unique_contacts_found': len(contact_map),
+                'contacts_saved': saved_count,
+                'top_contacts': self._get_top_contacts(contact_map, 10)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to extract sent contacts: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def _fetch_sent_emails(self, service, query: str, limit: int) -> List[Dict]:
+        """Fetch sent emails from Gmail"""
+        try:
+            results = service.users().messages().list(
+                userId='me',
+                q=query,
+                maxResults=limit
+            ).execute()
+            
+            messages = results.get('messages', [])
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch sent emails: {str(e)}")
+            return []
+    
+    def _extract_recipients_from_sent(self, sent_emails: List[Dict], service) -> Dict[str, Dict]:
+        """Extract recipient information from sent emails"""
+        contact_map = defaultdict(lambda: {
+            'email': '',
+            'name': '',
+            'sent_count': 0,
+            'first_sent': None,
+            'last_sent': None,
+            'threads': set()
+        })
+        
+        for msg_meta in sent_emails:
+            try:
+                # Fetch full message
+                message = service.users().messages().get(
+                    userId='me',
+                    id=msg_meta['id'],
+                    format='metadata',
+                    metadataHeaders=['To', 'Cc', 'Bcc', 'Date', 'Subject']
+                ).execute()
+                
+                # Extract headers
+                headers = {h['name'].lower(): h['value'] 
+                          for h in message['payload'].get('headers', [])}
+                
+                # Get date
+                date_str = headers.get('date', '')
+                try:
+                    email_date = datetime.strptime(date_str[:31], '%a, %d %b %Y %H:%M:%S')
+                except:
+                    email_date = datetime.utcnow()
+                
+                # Extract recipients from To, Cc, Bcc
+                all_recipients = []
+                
+                for field in ['to', 'cc', 'bcc']:
+                    if field in headers and headers[field]:
+                        recipients_str = headers[field]
+                        # Parse multiple recipients
+                        if ',' in recipients_str:
+                            recipients = recipients_str.split(',')
+                        else:
+                            recipients = [recipients_str]
+                        
+                        for recipient in recipients:
+                            name, email = parseaddr(recipient.strip())
+                            if email and '@' in email:
+                                all_recipients.append((name, email.lower()))
+                
+                # Update contact map
+                for name, email in all_recipients:
+                    contact = contact_map[email]
+                    contact['email'] = email
+                    contact['name'] = name or contact.get('name', '')
+                    contact['sent_count'] += 1
+                    contact['threads'].add(message.get('threadId'))
+                    
+                    if not contact['first_sent'] or email_date < contact['first_sent']:
+                        contact['first_sent'] = email_date
+                    
+                    if not contact['last_sent'] or email_date > contact['last_sent']:
+                        contact['last_sent'] = email_date
+                
+            except Exception as e:
+                logger.error(f"Failed to process message {msg_meta['id']}: {str(e)}")
+                continue
+        
+        # Convert sets to counts
+        for email, contact in contact_map.items():
+            contact['thread_count'] = len(contact['threads'])
+            del contact['threads']  # Remove set before saving
+        
+        return dict(contact_map)
+    
+    def _save_trusted_contacts(self, user_id: int, contact_map: Dict[str, Dict]) -> int:
+        """Save extracted contacts as trusted contacts"""
+        saved_count = 0
+        
+        for email, contact_data in contact_map.items():
+            try:
+                # Calculate engagement score
+                engagement_score = self._calculate_engagement_score(contact_data)
+                
+                # Determine relationship strength
+                if contact_data['sent_count'] >= 10:
+                    relationship_strength = 'high'
+                elif contact_data['sent_count'] >= 3:
+                    relationship_strength = 'medium'
+                else:
+                    relationship_strength = 'low'
+                
+                # Create person record
+                person_data = {
+                    'email_address': email,
+                    'name': contact_data['name'] or email.split('@')[0].title(),
+                    'first_mentioned': contact_data['first_sent'],
+                    'last_interaction': contact_data['last_sent'],
+                    'total_emails': contact_data['sent_count'],
+                    'communication_frequency': self._determine_frequency(contact_data),
+                    'importance_level': engagement_score,
+                    'relationship_type': 'sent_contact',
+                    'notes': f"Extracted from sent emails. Sent {contact_data['sent_count']} emails across {contact_data['thread_count']} threads."
+                }
+                
+                person = get_db_manager().create_or_update_person(user_id, person_data)
+                if person:
+                    saved_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Failed to save contact {email}: {str(e)}")
+                continue
+        
+        return saved_count
+    
+    def _calculate_engagement_score(self, contact_data: Dict) -> float:
+        """Calculate engagement score based on sent email patterns"""
+        score = 0.0
+        
+        # Frequency component (0-0.4)
+        sent_count = contact_data['sent_count']
+        if sent_count >= 20:
+            score += 0.4
+        elif sent_count >= 10:
+            score += 0.3
+        elif sent_count >= 5:
+            score += 0.2
+        else:
+            score += 0.1
+        
+        # Recency component (0-0.3)
+        if contact_data['last_sent']:
+            days_since = (datetime.utcnow() - contact_data['last_sent']).days
+            if days_since <= 7:
+                score += 0.3
+            elif days_since <= 30:
+                score += 0.2
+            elif days_since <= 90:
+                score += 0.1
+        
+        # Thread diversity component (0-0.3)
+        thread_ratio = contact_data['thread_count'] / max(contact_data['sent_count'], 1)
+        score += min(0.3, thread_ratio * 0.3)
+        
+        return min(1.0, score)
+    
+    def _determine_frequency(self, contact_data: Dict) -> str:
+        """Determine communication frequency"""
+        if not contact_data['first_sent'] or not contact_data['last_sent']:
+            return 'occasional'
+        
+        days_span = (contact_data['last_sent'] - contact_data['first_sent']).days
+        if days_span == 0:
+            return 'one-time'
+        
+        emails_per_day = contact_data['sent_count'] / max(days_span, 1)
+        
+        if emails_per_day >= 0.5:  # Multiple per week
+            return 'high'
+        elif emails_per_day >= 0.1:  # Weekly
+            return 'medium'
+        else:
+            return 'low'
+    
+    def _get_top_contacts(self, contact_map: Dict[str, Dict], limit: int) -> List[Dict]:
+        """Get top contacts by sent count"""
+        sorted_contacts = sorted(
+            contact_map.items(),
+            key=lambda x: x[1]['sent_count'],
+            reverse=True
+        )
+        
+        top_contacts = []
+        for email, data in sorted_contacts[:limit]:
+            top_contacts.append({
+                'email': email,
+                'name': data['name'],
+                'sent_count': data['sent_count'],
+                'last_sent': data['last_sent'].isoformat() if data['last_sent'] else None
+            })
+        
+        return top_contacts
+
+# Global instance
+sent_email_analyzer = SentEmailAnalyzer()

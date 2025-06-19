@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategic Intelligence System - Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 400px;
+            width: 100%;
+        }
+        .btn-google {
+            background: #4285f4;
+            border: none;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+        .btn-google:hover {
+            background: #3367d6;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(66, 133, 244, 0.3);
+            color: white;
+        }
+        .setup-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="text-center mb-4">
+            <h2 class="text-primary">
+                <i class="fas fa-brain"></i> Strategic Intelligence System
+            </h2>
+            <p class="text-muted">Sign in with Google to access Gmail analysis</p>
+        </div>
+        
+        <div class="text-center">
+            <a href="/auth/google" class="btn btn-google">
+                <i class="fab fa-google me-2"></i>
+                Sign in with Google
+            </a>
+        </div>
+        
+        <div class="setup-info">
+            <h6><i class="fas fa-info-circle"></i> Setup Required</h6>
+            <p class="mb-2">To use Google OAuth, you need to:</p>
+            <ol class="mb-0">
+                <li>Configure OAuth in Google Cloud Console</li>
+                <li>Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET</li>
+                <li>Use redirect URI: <code>http://localhost:8080/api/auth/callback</code></li>
+            </ol>
+            <p class="mt-2 mb-0">
+                <small>See <strong>GOOGLE_OAUTH_SETUP.md</strong> for detailed instructions.</small>
+            </p>
+        </div>
+        
+        <div class="text-center mt-4">
+            <small class="text-muted">
+                <a href="/dashboard" class="text-decoration-none">
+                    <i class="fas fa-chart-line"></i> Continue to Dashboard (Test Mode)
+                </a>
+            </small>
+        </div>
+    </div>
+</body>
+</html> 

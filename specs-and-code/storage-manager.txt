@@ -1,0 +1,401 @@
+# File: chief_of_staff_ai/storage/storage_manager.py
+"""
+Multi-Database Storage Manager
+==============================
+Orchestrates ChromaDB (vectors), Neo4j (graph), Redis (cache), and PostgreSQL (structured)
+"""
+
+import os
+from typing import Dict, List, Optional, Any
+import chromadb
+from neo4j import GraphDatabase
+import redis
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import json
+import logging
+from datetime import datetime
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+class StorageManager:
+    """Unified storage manager for the intelligence system"""
+    
+    def __init__(self):
+        # PostgreSQL for structured data (replaces SQLite)
+        self.pg_conn = psycopg2.connect(
+            host=os.getenv('POSTGRES_HOST', 'localhost'),
+            port=os.getenv('POSTGRES_PORT', 5432),
+            database=os.getenv('POSTGRES_DB', 'chief_of_staff'),
+            user=os.getenv('POSTGRES_USER', 'postgres'),
+            password=os.getenv('POSTGRES_PASSWORD', 'postgres')
+        )
+        
+        # ChromaDB for vector storage
+        self.chroma_client = chromadb.PersistentClient(
+            path=os.getenv('CHROMA_PATH', './data/chroma')
+        )
+        
+        # Neo4j for graph relationships
+        self.neo4j_driver = GraphDatabase.driver(
+            os.getenv('NEO4J_URI', 'bolt://localhost:7687'),
+            auth=(
+                os.getenv('NEO4J_USER', 'neo4j'),
+                os.getenv('NEO4J_PASSWORD', 'password')
+            )
+        )
+        
+        # Redis for caching and real-time
+        self.redis_client = redis.Redis(
+            host=os.getenv('REDIS_HOST', 'localhost'),
+            port=os.getenv('REDIS_PORT', 6379),
+            decode_responses=True
+        )
+        
+        # Initialize collections
+        self._init_collections()
+    
+    def _init_collections(self):
+        """Initialize vector collections in ChromaDB"""
+        # Email vectors for semantic search
+        self.email_collection = self.chroma_client.get_or_create_collection(
+            name="emails",
+            metadata={"description": "Email embeddings for semantic search"}
+        )
+        
+        # Contact vectors for similarity matching
+        self.contact_collection = self.chroma_client.get_or_create_collection(
+            name="contacts",
+            metadata={"description": "Contact embeddings for similarity"}
+        )
+        
+        # Topic vectors for knowledge clustering
+        self.topic_collection = self.chroma_client.get_or_create_collection(
+            name="topics",
+            metadata={"description": "Topic embeddings for clustering"}
+        )
+        
+        # Insight vectors for pattern matching
+        self.insight_collection = self.chroma_client.get_or_create_collection(
+            name="insights",
+            metadata={"description": "Insight embeddings for discovery"}
+        )
+    
+    # ===== VECTOR OPERATIONS (ChromaDB) =====
+    
+    def store_email_vectors(self, user_id: int, emails: List[Dict]) -> bool:
+        """Store email embeddings for semantic search"""
+        try:
+            # Generate embeddings (using Claude or OpenAI)
+            embeddings = self._generate_embeddings([
+                f"{e.get('subject', '')} {e.get('body_text', '')[:500]}"
+                for e in emails
+            ])
+            
+            # Prepare metadata
+            metadatas = [{
+                'user_id': user_id,
+                'email_id': email['id'],
+                'sender': email.get('sender', ''),
+                'date': email.get('email_date', ''),
+                'thread_id': email.get('thread_id', ''),
+                'has_attachments': email.get('has_attachments', False)
+            } for email in emails]
+            
+            # Store in ChromaDB
+            self.email_collection.add(
+                embeddings=embeddings,
+                metadatas=metadatas,
+                ids=[f"user_{user_id}_email_{e['id']}" for e in emails]
+            )
+            
+            logger.info(f"Stored {len(emails)} email vectors for user {user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store email vectors: {str(e)}")
+            return False
+    
+    def semantic_email_search(self, user_id: int, query: str, limit: int = 10) -> List[Dict]:
+        """Semantic search across emails"""
+        try:
+            # Generate query embedding
+            query_embedding = self._generate_embeddings([query])[0]
+            
+            # Search in ChromaDB
+            results = self.email_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                where={"user_id": user_id}
+            )
+            
+            # Format results
+            search_results = []
+            for i, metadata in enumerate(results['metadatas'][0]):
+                search_results.append({
+                    'email_id': metadata['email_id'],
+                    'sender': metadata['sender'],
+                    'date': metadata['date'],
+                    'distance': results['distances'][0][i],
+                    'relevance': 1 - results['distances'][0][i]  # Convert distance to relevance
+                })
+            
+            return search_results
+            
+        except Exception as e:
+            logger.error(f"Semantic search error: {str(e)}")
+            return []
+    
+    # ===== GRAPH OPERATIONS (Neo4j) =====
+    
+    def create_relationship_graph(self, user_id: int, relationships: List[Dict]):
+        """Build relationship graph in Neo4j"""
+        with self.neo4j_driver.session() as session:
+            try:
+                # Create nodes and relationships
+                for rel in relationships:
+                    session.run("""
+                        MERGE (p1:Person {email: $email1, user_id: $user_id})
+                        MERGE (p2:Person {email: $email2, user_id: $user_id})
+                        CREATE (p1)-[r:COMMUNICATES_WITH {
+                            strength: $strength,
+                            last_interaction: $last_interaction,
+                            topics: $topics
+                        }]->(p2)
+                    """, {
+                        'user_id': user_id,
+                        'email1': rel['person1_email'],
+                        'email2': rel['person2_email'],
+                        'strength': rel['strength'],
+                        'last_interaction': rel['last_interaction'],
+                        'topics': rel['topics']
+                    })
+                
+                logger.info(f"Created {len(relationships)} relationships in graph")
+                
+            except Exception as e:
+                logger.error(f"Graph creation error: {str(e)}")
+    
+    def find_influence_paths(self, user_id: int, source_email: str, target_email: str) -> List[Dict]:
+        """Find influence paths between two people"""
+        with self.neo4j_driver.session() as session:
+            try:
+                result = session.run("""
+                    MATCH path = shortestPath(
+                        (source:Person {email: $source, user_id: $user_id})
+                        -[*..6]->
+                        (target:Person {email: $target, user_id: $user_id})
+                    )
+                    RETURN path, length(path) as path_length
+                    ORDER BY path_length
+                    LIMIT 5
+                """, {
+                    'user_id': user_id,
+                    'source': source_email,
+                    'target': target_email
+                })
+                
+                paths = []
+                for record in result:
+                    path_nodes = []
+                    for node in record['path'].nodes:
+                        path_nodes.append(node['email'])
+                    
+                    paths.append({
+                        'path': path_nodes,
+                        'length': record['path_length'],
+                        'influence_score': 1.0 / (record['path_length'] + 1)
+                    })
+                
+                return paths
+                
+            except Exception as e:
+                logger.error(f"Path finding error: {str(e)}")
+                return []
+    
+    def get_network_metrics(self, user_id: int, person_email: str) -> Dict:
+        """Calculate network centrality metrics"""
+        with self.neo4j_driver.session() as session:
+            try:
+                # Degree centrality
+                degree_result = session.run("""
+                    MATCH (p:Person {email: $email, user_id: $user_id})
+                    -[r:COMMUNICATES_WITH]-()
+                    RETURN count(r) as degree
+                """, {'email': person_email, 'user_id': user_id})
+                
+                # Betweenness centrality (simplified)
+                between_result = session.run("""
+                    MATCH (p:Person {email: $email, user_id: $user_id})
+                    MATCH path = (a:Person)-[*..3]-(b:Person)
+                    WHERE p IN nodes(path) AND a <> b AND a.user_id = $user_id
+                    RETURN count(path) as betweenness
+                """, {'email': person_email, 'user_id': user_id})
+                
+                degree = degree_result.single()['degree'] if degree_result else 0
+                betweenness = between_result.single()['betweenness'] if between_result else 0
+                
+                return {
+                    'degree_centrality': degree,
+                    'betweenness_centrality': betweenness,
+                    'influence_rank': self._calculate_influence_rank(degree, betweenness)
+                }
+                
+            except Exception as e:
+                logger.error(f"Network metrics error: {str(e)}")
+                return {}
+    
+    # ===== CACHE OPERATIONS (Redis) =====
+    
+    def cache_analysis_result(self, key: str, result: Dict, ttl: int = 3600):
+        """Cache analysis results in Redis"""
+        try:
+            self.redis_client.setex(
+                f"analysis:{key}",
+                ttl,
+                json.dumps(result)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Cache write error: {str(e)}")
+            return False
+    
+    def get_cached_analysis(self, key: str) -> Optional[Dict]:
+        """Retrieve cached analysis"""
+        try:
+            cached = self.redis_client.get(f"analysis:{key}")
+            return json.loads(cached) if cached else None
+        except Exception as e:
+            logger.error(f"Cache read error: {str(e)}")
+            return None
+    
+    def publish_realtime_update(self, user_id: int, update_type: str, data: Dict):
+        """Publish real-time updates via Redis pub/sub"""
+        try:
+            channel = f"user:{user_id}:updates"
+            message = json.dumps({
+                'type': update_type,
+                'data': data,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+            self.redis_client.publish(channel, message)
+        except Exception as e:
+            logger.error(f"Publish error: {str(e)}")
+    
+    # ===== STRUCTURED DATA (PostgreSQL) =====
+    
+    def migrate_from_sqlite(self, sqlite_path: str):
+        """Migrate existing SQLite data to PostgreSQL"""
+        import sqlite3
+        
+        try:
+            # Connect to SQLite
+            sqlite_conn = sqlite3.connect(sqlite_path)
+            sqlite_conn.row_factory = sqlite3.Row
+            
+            # Create PostgreSQL schema
+            self._create_postgresql_schema()
+            
+            # Migrate each table
+            tables = ['users', 'emails', 'people', 'trusted_contacts', 'tasks', 'projects', 'topics']
+            
+            for table in tables:
+                logger.info(f"Migrating table: {table}")
+                
+                # Read from SQLite
+                rows = sqlite_conn.execute(f"SELECT * FROM {table}").fetchall()
+                
+                if rows:
+                    # Insert into PostgreSQL
+                    columns = rows[0].keys()
+                    placeholders = ','.join(['%s'] * len(columns))
+                    
+                    with self.pg_conn.cursor() as cursor:
+                        for row in rows:
+                            cursor.execute(
+                                f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
+                                tuple(row)
+                            )
+                    
+                    self.pg_conn.commit()
+                    logger.info(f"Migrated {len(rows)} rows from {table}")
+            
+            sqlite_conn.close()
+            logger.info("Migration complete!")
+            
+        except Exception as e:
+            logger.error(f"Migration error: {str(e)}")
+            self.pg_conn.rollback()
+    
+    def _create_postgresql_schema(self):
+        """Create PostgreSQL schema with enhanced features"""
+        with self.pg_conn.cursor() as cursor:
+            # Enable extensions
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS pgvector;")  # For embeddings
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")   # For fuzzy search
+            
+            # Create tables with better structure
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_trees (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    tree_data JSONB NOT NULL,
+                    embeddings vector(1536),  -- For semantic search
+                    time_window_days INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    confidence_score FLOAT,
+                    metadata JSONB,
+                    
+                    -- Indexes for performance
+                    INDEX idx_user_created (user_id, created_at DESC),
+                    INDEX idx_tree_data_gin (tree_data) USING gin,
+                    INDEX idx_embeddings (embeddings) USING ivfflat
+                );
+            """)
+            
+            self.pg_conn.commit()
+    
+    # ===== OBJECT STORAGE (S3/MinIO) =====
+    
+    def store_large_content(self, key: str, content: bytes) -> str:
+        """Store large content (emails, attachments) in object storage"""
+        import boto3
+        
+        try:
+            s3_client = boto3.client(
+                's3',
+                endpoint_url=os.getenv('S3_ENDPOINT', 'http://localhost:9000'),
+                aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'minioadmin'),
+                aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'minioadmin')
+            )
+            
+            bucket = os.getenv('S3_BUCKET', 'chief-of-staff')
+            
+            s3_client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=content
+            )
+            
+            return f"s3://{bucket}/{key}"
+            
+        except Exception as e:
+            logger.error(f"Object storage error: {str(e)}")
+            return ""
+    
+    # ===== HELPER METHODS =====
+    
+    def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using Claude or OpenAI"""
+        # Implement using your preferred embedding model
+        # For now, return mock embeddings
+        return [np.random.rand(1536).tolist() for _ in texts]
+    
+    def _calculate_influence_rank(self, degree: int, betweenness: int) -> float:
+        """Calculate influence rank from network metrics"""
+        # Simple formula - can be enhanced
+        return (degree * 0.6 + betweenness * 0.4) / 100
+
+# Global storage manager instance
+storage_manager = StorageManager()

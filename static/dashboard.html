@@ -1,0 +1,1817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategic Intelligence System - Manual Test Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .dashboard-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            margin: 20px;
+            padding: 30px;
+        }
+        
+        .step-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s ease;
+        }
+        
+        .step-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .step-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px 15px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .step-content {
+            padding: 25px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 25px;
+            font-weight: 600;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 25px;
+            font-weight: 600;
+        }
+        
+        .btn-info {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 25px;
+            font-weight: 600;
+        }
+        
+        .status-badge {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-running {
+            background: #cce5ff;
+            color: #004085;
+        }
+        
+        .results-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .contact-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .contact-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .contact-details {
+            display: none;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        
+        .intelligence-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        
+        .intelligence-section {
+            background: #e3f2fd;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .company-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            border-left: 5px solid #56ab2f;
+            transition: all 0.3s ease;
+        }
+        
+        .company-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.15);
+        }
+        
+        .company-header {
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 12px 12px 0 0;
+            cursor: pointer;
+        }
+        
+        .company-content {
+            padding: 20px;
+            display: none;
+        }
+        
+        .company-stats {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .stat-badge {
+            background: #f8f9fa;
+            border-radius: 20px;
+            padding: 8px 15px;
+            font-size: 0.9em;
+            color: #495057;
+        }
+        
+        .person-in-company {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+            border-left: 3px solid #667eea;
+        }
+        
+        .intelligence-badge {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin: 2px;
+        }
+        
+        .no-intelligence {
+            background: #6c757d;
+        }
+        
+        .progress-container {
+            margin: 20px 0;
+        }
+        
+        .progress {
+            height: 8px;
+            border-radius: 10px;
+        }
+        
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .file-info {
+            background: #e9ecef;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        
+        .knowledge-tree-node {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            position: relative;
+        }
+        
+        .knowledge-tree-node::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 50%;
+            width: 20px;
+            height: 2px;
+            background: #667eea;
+        }
+        
+        .prediction-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        
+        .insight-item {
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="text-center mb-5">
+            <h1 class="display-4 fw-bold text-primary">
+                <i class="fas fa-brain"></i> Strategic Intelligence System
+            </h1>
+            <p class="lead text-muted">Manual Test Dashboard - Complete Flow Testing</p>
+            
+            <!-- Authentication Status -->
+            <div class="row justify-content-center mb-4">
+                <div class="col-md-8">
+                    <div class="alert alert-info" id="auth-status">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="fas fa-user-circle"></i> 
+                                <strong>Authentication Status:</strong> 
+                                <span id="auth-status-text">Checking...</span>
+                            </div>
+                            <div>
+                                <a href="/login" class="btn btn-sm btn-outline-primary" id="login-btn">
+                                    <i class="fas fa-sign-in-alt"></i> Login
+                                </a>
+                                <a href="/logout" class="btn btn-sm btn-outline-secondary" id="logout-btn" style="display: none;">
+                                    <i class="fas fa-sign-out-alt"></i> Logout
+                                </a>
+                            </div>
+                        </div>
+                        <small class="text-muted" id="auth-details"></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Control Panel -->
+            <div class="row justify-content-center mb-4">
+                <div class="col-md-10">
+                    <div class="card border-warning">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="mb-0"><i class="fas fa-tools"></i> System Control Panel</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <h6>Database Operations</h6>
+                                    <div class="d-grid gap-2">
+                                        <button class="btn btn-outline-info" onclick="checkSystemHealth()">
+                                            <i class="fas fa-heartbeat"></i> Check System Health
+                                        </button>
+                                        <button class="btn btn-danger" onclick="flushSystem()" id="flush-system-btn">
+                                            <i class="fas fa-broom"></i> FLUSH ALL DATA
+                                        </button>
+                                    </div>
+                                    <small class="text-muted">⚠️ Flush will permanently delete ALL user data</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <h6>Quick Actions</h6>
+                                    <div class="d-grid gap-2">
+                                        <button class="btn btn-outline-secondary" onclick="refreshAuthStatus()">
+                                            <i class="fas fa-sync"></i> Refresh Auth Status
+                                        </button>
+                                        <button class="btn btn-outline-warning" onclick="clearBrowserCache()">
+                                            <i class="fas fa-trash-alt"></i> Clear Browser Cache
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div id="system-status-summary" class="small">
+                                        <strong>Last Check:</strong> <span id="last-health-check">Never</span><br>
+                                        <strong>Status:</strong> <span id="system-status-text" class="text-muted">Unknown</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Flush Results -->
+                            <div id="flush-results" class="mt-3" style="display: none;">
+                                <div class="alert alert-success" role="alert">
+                                    <h6><i class="fas fa-check-circle"></i> Flush Completed Successfully!</h6>
+                                    <div id="flush-details"></div>
+                                    <small class="text-muted">Please refresh your browser and re-authenticate</small>
+                                </div>
+                            </div>
+                            
+                            <!-- System Health Details -->
+                            <div id="health-details" class="mt-3" style="display: none;">
+                                <h6>System Health Details:</h6>
+                                <div id="health-components"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 1: Sent Email Contact Import -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-envelope"></i> Step 1: Sent Email Contact Import</h3>
+                    <p class="mb-0">Extract trusted contacts from sent emails</p>
+                </div>
+                <span class="status-badge status-pending" id="step1-status">Pending</span>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Files Involved:</h5>
+                        <div class="file-info">
+                            • gmail/analyzer.py - SentEmailAnalyzer<br>
+                            • gmail/client.py - GmailClient<br>
+                            • api/routes.py - /api/gmail/analyze-sent<br>
+                            • storage/postgres_client.py - Contact storage
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Lookback Days:</label>
+                            <input type="number" class="form-control" id="lookback-days" value="180" min="30" max="365">
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="analyzeSentEmails()">
+                            <i class="fas fa-play"></i> Analyze Sent Emails
+                        </button>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="loading-spinner" id="step1-loading">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-2">Analyzing sent emails...</p>
+                        </div>
+                        <div class="results-container" id="step1-results" style="display: none;">
+                            <h6>Extracted Contacts:</h6>
+                            <div id="contacts-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Contact List Presentation -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-users"></i> Step 2: Contact List Presentation</h3>
+                    <p class="mb-0">View and filter extracted contacts</p>
+                </div>
+                <span class="status-badge status-pending" id="step2-status">Pending</span>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h5>Files Involved:</h5>
+                        <div class="file-info">
+                            • api/routes.py - /api/contacts<br>
+                            • storage/postgres_client.py - Contact retrieval<br>
+                            • models/contact.py - Contact model
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Trust Tier:</label>
+                            <select class="form-select" id="trust-tier-filter">
+                                <option value="">All Tiers</option>
+                                <option value="1">Tier 1 (High Trust)</option>
+                                <option value="2">Tier 2 (Medium Trust)</option>
+                                <option value="3">Tier 3 (Low Trust)</option>
+                            </select>
+                        </div>
+                        
+                        <button class="btn btn-success" onclick="loadContacts()">
+                            <i class="fas fa-list"></i> Load Contacts
+                        </button>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="loading-spinner" id="step2-loading">
+                            <div class="spinner-border text-success" role="status"></div>
+                            <p class="mt-2">Loading contacts...</p>
+                        </div>
+                        <div class="results-container" id="step2-results" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>Contact List</h6>
+                                <span class="badge bg-primary" id="contact-count">0 contacts</span>
+                            </div>
+                            <div id="contacts-display"></div>
+                            
+                            <!-- Companies Section -->
+                            <div class="mt-4" id="companies-section" style="display: none;">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6><i class="fas fa-building"></i> Companies Intelligence</h6>
+                                    <span class="badge bg-success" id="company-count">0 companies</span>
+                                </div>
+                                <div id="companies-display"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Contact Augmentation -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-search-plus"></i> Step 3: Contact Augmentation</h3>
+                    <p class="mb-0">Enrich contacts with web data</p>
+                </div>
+                <span class="status-badge status-pending" id="step3-status">Pending</span>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h5>Files Involved:</h5>
+                        <div class="file-info">
+                            • intelligence/web_enrichment/<br>
+                            &nbsp;&nbsp;enrichment_orchestrator.py<br>
+                            • intelligence/web_enrichment/<br>
+                            &nbsp;&nbsp;linkedin_scraper.py<br>
+                            • intelligence/web_enrichment/<br>
+                            &nbsp;&nbsp;twitter_scraper.py<br>
+                            • intelligence/web_enrichment/<br>
+                            &nbsp;&nbsp;company_scraper.py
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Enrichment Sources:</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="enrich-linkedin" checked>
+                                <label class="form-check-label" for="enrich-linkedin">LinkedIn</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="enrich-twitter" checked>
+                                <label class="form-check-label" for="enrich-twitter">Twitter</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="enrich-company" checked>
+                                <label class="form-check-label" for="enrich-company">Company Data</label>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-warning" onclick="enrichContacts()">
+                            <i class="fas fa-magic"></i> Enrich Contacts
+                        </button>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="loading-spinner" id="step3-loading">
+                            <div class="spinner-border text-warning" role="status"></div>
+                            <p class="mt-2">Enriching contacts...</p>
+                        </div>
+                        <div class="results-container" id="step3-results" style="display: none;">
+                            <h6>Enriched Contacts:</h6>
+                            <div id="enriched-contacts"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Email Import -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-download"></i> Step 4: Email Import</h3>
+                    <p class="mb-0">Import emails based on trusted contacts</p>
+                </div>
+                <span class="status-badge status-pending" id="step4-status">Pending</span>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h5>Files Involved:</h5>
+                        <div class="file-info">
+                            • gmail/email_processor.py<br>
+                            • gmail/client.py<br>
+                            • api/routes.py - /api/emails/sync<br>
+                            • storage/postgres_client.py - Email storage
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Import Settings:</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="import-sent" checked>
+                                <label class="form-check-label" for="import-sent">Sent Emails</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="import-received" checked>
+                                <label class="form-check-label" for="import-received">Received Emails</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="import-threads" checked>
+                                <label class="form-check-label" for="import-threads">Email Threads</label>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-info" onclick="importEmails()">
+                            <i class="fas fa-cloud-download-alt"></i> Import Emails
+                        </button>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="loading-spinner" id="step4-loading">
+                            <div class="spinner-border text-info" role="status"></div>
+                            <p class="mt-2">Importing emails...</p>
+                        </div>
+                        <div class="results-container" id="step4-results" style="display: none;">
+                            <h6>Imported Emails:</h6>
+                            <div id="emails-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 5: Knowledge Tree Creation -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-tree"></i> Step 5: Knowledge Tree Creation</h3>
+                    <p class="mb-0">Build intelligence from collected data</p>
+                </div>
+                <span class="status-badge status-pending" id="step5-status">Pending</span>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h5>Files Involved:</h5>
+                        <div class="file-info">
+                            • intelligence/claude_analysis.py<br>
+                            • intelligence/knowledge_tree/<br>
+                            &nbsp;&nbsp;tree_builder.py<br>
+                            • intelligence/analysts/<br>
+                            &nbsp;&nbsp;base_analyst.py<br>
+                            • api/intelligence_routes.py
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Analysis Settings:</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="analyze-business" checked>
+                                <label class="form-check-label" for="analyze-business">Business Analysis</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="analyze-relationships" checked>
+                                <label class="form-check-label" for="analyze-relationships">Relationship Analysis</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="analyze-technical" checked>
+                                <label class="form-check-label" for="analyze-technical">Technical Analysis</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="analyze-market" checked>
+                                <label class="form-check-label" for="analyze-market">Market Analysis</label>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="buildKnowledgeTree()">
+                            <i class="fas fa-cogs"></i> Build Knowledge Tree
+                        </button>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="loading-spinner" id="step5-loading">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-2">Building knowledge tree...</p>
+                        </div>
+                        <div class="results-container" id="step5-results" style="display: none;">
+                            <h6>Knowledge Tree:</h6>
+                            <div id="knowledge-tree-display"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6: Advanced Features -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-chart-line"></i> Step 6: Advanced Features</h3>
+                    <p class="mb-0">Predictions, insights, and intelligence</p>
+                </div>
+                <span class="status-badge status-pending" id="step6-status">Pending</span>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h5>Files Involved:</h5>
+                        <div class="file-info">
+                            • intelligence/predictions/<br>
+                            &nbsp;&nbsp;prediction_engine.py<br>
+                            • intelligence/calendar/<br>
+                            &nbsp;&nbsp;calendar_intelligence.py<br>
+                            • api/intelligence_routes.py<br>
+                            • intelligence/deep_augmentation.py
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" onclick="generatePredictions()">
+                                <i class="fas fa-crystal-ball"></i> Generate Predictions
+                            </button>
+                            <button class="btn btn-warning" onclick="getInsights()">
+                                <i class="fas fa-lightbulb"></i> Get Insights
+                            </button>
+                            <button class="btn btn-info" onclick="getRelationships()">
+                                <i class="fas fa-project-diagram"></i> View Relationships
+                            </button>
+                            <button class="btn btn-primary" onclick="deepAugmentation()">
+                                <i class="fas fa-brain"></i> Deep Augmentation
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="results-container" id="step6-results" style="display: none;">
+                            <ul class="nav nav-tabs" id="advancedTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="predictions-tab" data-bs-toggle="tab" data-bs-target="#predictions" type="button" role="tab">Predictions</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="insights-tab" data-bs-toggle="tab" data-bs-target="#insights" type="button" role="tab">Insights</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="relationships-tab" data-bs-toggle="tab" data-bs-target="#relationships" type="button" role="tab">Relationships</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="augmentation-tab" data-bs-toggle="tab" data-bs-target="#augmentation" type="button" role="tab">Augmentation</button>
+                                </li>
+                            </ul>
+                            <div class="tab-content" id="advancedTabContent">
+                                <div class="tab-pane fade show active" id="predictions" role="tabpanel">
+                                    <div id="predictions-content"></div>
+                                </div>
+                                <div class="tab-pane fade" id="insights" role="tabpanel">
+                                    <div id="insights-content"></div>
+                                </div>
+                                <div class="tab-pane fade" id="relationships" role="tabpanel">
+                                    <div id="relationships-content"></div>
+                                </div>
+                                <div class="tab-pane fade" id="augmentation" role="tabpanel">
+                                    <div id="augmentation-content"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="step-card">
+            <div class="step-header">
+                <div>
+                    <h3><i class="fas fa-server"></i> System Status</h3>
+                    <p class="mb-0">Database and service health</p>
+                </div>
+            </div>
+            <div class="step-content">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-outline-primary" onclick="checkSystemHealth()">
+                                <i class="fas fa-heartbeat"></i> Check System Health
+                            </button>
+                            <button class="btn btn-warning" onclick="flushSystem()" id="flush-system-btn">
+                                <i class="fas fa-broom"></i> FLUSH ALL DATA
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div id="system-health"></div>
+                        <div id="flush-results" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Global variables
+        let currentStep = 0;
+        let contacts = [];
+        let enrichedContacts = [];
+        let emails = [];
+        let knowledgeTree = null;
+
+        // Utility functions
+        function showLoading(stepId) {
+            document.getElementById(`${stepId}-loading`).style.display = 'block';
+            document.getElementById(`${stepId}-results`).style.display = 'none';
+            document.getElementById(`${stepId}-status`).className = 'status-badge status-running';
+            document.getElementById(`${stepId}-status`).textContent = 'Running';
+        }
+
+        function hideLoading(stepId) {
+            document.getElementById(`${stepId}-loading`).style.display = 'none';
+        }
+
+        function updateStatus(stepId, status, message) {
+            const statusElement = document.getElementById(`${stepId}-status`);
+            statusElement.className = `status-badge status-${status}`;
+            statusElement.textContent = message;
+        }
+
+        function showResults(stepId) {
+            document.getElementById(`${stepId}-results`).style.display = 'block';
+        }
+
+        async function makeApiCall(endpoint, method = 'GET', data = null) {
+            console.log('makeApiCall:', method, endpoint, data);
+            try {
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'same-origin'  // Include session cookies
+                };
+                
+                if (data) {
+                    options.body = JSON.stringify(data);
+                }
+                
+                console.log('Fetch options:', options);
+                const response = await fetch(`/api${endpoint}`, options);
+                console.log('Response status:', response.status, response.statusText);
+                
+                const result = await response.json();
+                console.log('Response body:', result);
+                
+                if (!response.ok) {
+                    throw new Error(result.error || 'API call failed');
+                }
+                
+                return result;
+            } catch (error) {
+                console.error('API call failed:', error);
+                throw error;
+            }
+        }
+
+        // Step 1: Analyze Sent Emails
+        async function analyzeSentEmails() {
+            try {
+                showLoading('step1');
+                
+                const lookbackDays = document.getElementById('lookback-days').value;
+                const result = await makeApiCall('/gmail/analyze-sent', 'POST', {
+                    lookback_days: parseInt(lookbackDays),
+                    force_refresh: true
+                });
+                
+                hideLoading('step1');
+                updateStatus('step1', 'success', 'Completed');
+                showResults('step1');
+                
+                // Display results
+                const contactsList = document.getElementById('contacts-list');
+                contactsList.innerHTML = `
+                    <div class="alert alert-success">
+                        <strong>Success!</strong> Extracted ${result.contacts?.length || 0} trusted contacts
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <strong>Total Contacts:</strong> ${result.contacts?.length || 0}
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Analysis Time:</strong> ${result.analysis_time || 'N/A'}
+                        </div>
+                    </div>
+                `;
+                
+                contacts = result.contacts || [];
+                currentStep = 1;
+                
+            } catch (error) {
+                hideLoading('step1');
+                updateStatus('step1', 'error', 'Failed');
+                document.getElementById('step1-results').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Step 2: Load Contacts
+        async function loadContacts() {
+            console.log('loadContacts function called');
+            try {
+                console.log('Starting contact loading...');
+                showLoading('step2');
+                
+                const trustTier = document.getElementById('trust-tier-filter').value;
+                const params = new URLSearchParams();
+                if (trustTier) params.append('trust_tier', trustTier);
+                
+                console.log('Making API call to /contacts with params:', params.toString());
+                const result = await makeApiCall(`/contacts?${params.toString()}`);
+                
+                console.log('API call successful, result:', result);
+                hideLoading('step2');
+                updateStatus('step2', 'success', 'Completed');
+                showResults('step2');
+                
+                // Display contacts with intelligence data
+                const contactsDisplay = document.getElementById('contacts-display');
+                const contactCount = document.getElementById('contact-count');
+                
+                contactCount.textContent = `${result.contacts?.length || 0} contacts`;
+                
+                if (result.contacts && result.contacts.length > 0) {
+                    console.log('Displaying', result.contacts.length, 'contacts with intelligence data');
+                    contactsDisplay.innerHTML = result.contacts.map(contact => {
+                        // Parse intelligence data
+                        let intelligenceData = {};
+                        let enrichmentStatus = 'not_enriched';
+                        let enrichmentTimestamp = null;
+                        
+                        try {
+                            if (contact.metadata) {
+                                const metadata = typeof contact.metadata === 'string' ? JSON.parse(contact.metadata) : contact.metadata;
+                                intelligenceData = metadata.intelligence_data || {};
+                                enrichmentStatus = metadata.enrichment_status || 'not_enriched';
+                                enrichmentTimestamp = metadata.enrichment_timestamp;
+                            }
+                        } catch (e) {
+                            console.warn('Failed to parse metadata for contact:', contact.email);
+                        }
+                        
+                        // Count intelligence sources (check for non-null values)
+                        const hasPersonIntel = intelligenceData.person && intelligenceData.person !== null && Object.keys(intelligenceData.person).length > 0;
+                        const hasCompanyIntel = intelligenceData.company && intelligenceData.company !== null && Object.keys(intelligenceData.company).length > 0;
+                        const hasProfessionalIntel = intelligenceData.professional && intelligenceData.professional !== null && Object.keys(intelligenceData.professional).length > 0;
+                        
+                        const intelCount = [hasPersonIntel, hasCompanyIntel, hasProfessionalIntel].filter(Boolean).length;
+                        const wasEnriched = enrichmentStatus !== 'not_enriched';
+                        
+                        return `
+                            <div class="contact-item" onclick="toggleContactDetails('${contact.id}')">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>${contact.name || contact.email}</strong>
+                                        <br><small class="text-muted">${contact.email}</small>
+                                        <div class="mt-1">
+                                            ${hasPersonIntel ? '<span class="intelligence-badge">Personal</span>' : '<span class="intelligence-badge no-intelligence">No Personal</span>'}
+                                            ${hasCompanyIntel ? '<span class="intelligence-badge">Company</span>' : '<span class="intelligence-badge no-intelligence">No Company</span>'}
+                                            ${hasProfessionalIntel ? '<span class="intelligence-badge">Professional</span>' : '<span class="intelligence-badge no-intelligence">No Professional</span>'}
+                                            ${wasEnriched ? `<span class="intelligence-badge" style="background: #6c757d; font-size: 0.7em;">✓ Enriched</span>` : '<span class="intelligence-badge no-intelligence" style="font-size: 0.7em;">Not Enriched</span>'}
+                                        </div>
+                                    </div>
+                                    <div class="text-end">
+                                        <span class="badge bg-primary">Tier ${contact.trust_tier}</span>
+                                        <br><small class="text-muted">${intelCount}/3 Intel Sources</small>
+                                    </div>
+                                </div>
+                                <div class="contact-details" id="contact-${contact.id}">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <strong>📊 Basic Info:</strong><br>
+                                            <strong>Frequency:</strong> ${contact.frequency}<br>
+                                            <strong>Domain:</strong> ${contact.domain}<br>
+                                            <strong>Last Contact:</strong> ${contact.last_contact || 'N/A'}<br>
+                                            <strong>Engagement Score:</strong> ${contact.engagement_score || 'N/A'}
+                                        </div>
+                                        <div class="col-md-6">
+                                            ${intelCount > 0 ? `
+                                                <strong>🧠 Intelligence Data:</strong><br>
+                                                ${hasPersonIntel ? `
+                                                    <div class="intelligence-section">
+                                                        <strong>👤 Personal Intelligence:</strong><br>
+                                                        ${Object.entries(intelligenceData.person || {}).map(([key, value]) => 
+                                                            `<small><strong>${key}:</strong> ${typeof value === 'object' ? JSON.stringify(value) : value}</small><br>`
+                                                        ).join('')}
+                                                    </div>
+                                                ` : ''}
+                                                ${hasCompanyIntel ? `
+                                                    <div class="intelligence-section">
+                                                        <strong>🏢 Company Intelligence:</strong><br>
+                                                        ${Object.entries(intelligenceData.company || {}).map(([key, value]) => 
+                                                            `<small><strong>${key}:</strong> ${typeof value === 'object' ? JSON.stringify(value) : value}</small><br>`
+                                                        ).join('')}
+                                                    </div>
+                                                ` : ''}
+                                                ${hasProfessionalIntel ? `
+                                                    <div class="intelligence-section">
+                                                        <strong>💼 Professional Intelligence:</strong><br>
+                                                        ${Object.entries(intelligenceData.professional || {}).map(([key, value]) => 
+                                                            `<small><strong>${key}:</strong> ${typeof value === 'object' ? JSON.stringify(value) : value}</small><br>`
+                                                        ).join('')}
+                                                    </div>
+                                                ` : ''}
+                                            ` : `
+                                                ${wasEnriched ? `
+                                                    <div class="alert alert-warning">
+                                                        <strong>📊 Enrichment Status:</strong> ${enrichmentStatus}<br>
+                                                        <small><strong>🕐 Attempted:</strong> ${enrichmentTimestamp ? new Date(enrichmentTimestamp).toLocaleString() : 'Unknown'}</small><br>
+                                                        <small><strong>❌ Result:</strong> No intelligence data found</small><br>
+                                                        <small><strong>💡 Possible Reasons:</strong></small>
+                                                        <ul class="small mb-0">
+                                                            <li>Google search rate limiting (429 errors)</li>
+                                                            <li>Contact has limited public profile</li>
+                                                            <li>Company/domain has no public information</li>
+                                                            <li>Search queries didn't return relevant results</li>
+                                                        </ul>
+                                                    </div>
+                                                ` : `
+                                                    <div class="alert alert-info">
+                                                        <small>💡 No intelligence data available. Run <strong>Contact Augmentation (Step 3)</strong> to enrich this contact with web intelligence.</small>
+                                                    </div>
+                                                `}
+                                            `}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    // Group contacts by company and display companies section
+                    displayCompaniesSection(result.contacts);
+                } else {
+                    console.log('No contacts found');
+                    contactsDisplay.innerHTML = '<div class="alert alert-info">No contacts found</div>';
+                    // Hide companies section
+                    document.getElementById('companies-section').style.display = 'none';
+                }
+                
+                currentStep = 2;
+                
+            } catch (error) {
+                console.error('loadContacts error:', error);
+                hideLoading('step2');
+                updateStatus('step2', 'error', 'Failed');
+                document.getElementById('step2-results').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // Display companies section with grouped contacts
+        function displayCompaniesSection(contacts) {
+            // Group contacts by domain
+            const companiesMap = {};
+            contacts.forEach(contact => {
+                const domain = contact.domain || 'Unknown';
+                if (!companiesMap[domain]) {
+                    companiesMap[domain] = {
+                        domain: domain,
+                        contacts: [],
+                        totalIntelligence: 0,
+                        companyIntelligence: null,
+                        enrichmentAttempted: false
+                    };
+                }
+                companiesMap[domain].contacts.push(contact);
+                
+                // Check for company intelligence in any contact
+                try {
+                    if (contact.metadata) {
+                        const metadata = typeof contact.metadata === 'string' ? JSON.parse(contact.metadata) : contact.metadata;
+                        const intelligenceData = metadata.intelligence_data || {};
+                        if (intelligenceData.company && intelligenceData.company !== null && Object.keys(intelligenceData.company).length > 0) {
+                            companiesMap[domain].companyIntelligence = intelligenceData.company;
+                        }
+                        
+                        // Count total intelligence sources (check for non-null values)
+                        const hasPersonIntel = intelligenceData.person && intelligenceData.person !== null && Object.keys(intelligenceData.person).length > 0;
+                        const hasCompanyIntel = intelligenceData.company && intelligenceData.company !== null && Object.keys(intelligenceData.company).length > 0;
+                        const hasProfessionalIntel = intelligenceData.professional && intelligenceData.professional !== null && Object.keys(intelligenceData.professional).length > 0;
+                        const intelCount = [hasPersonIntel, hasCompanyIntel, hasProfessionalIntel].filter(Boolean).length;
+                        companiesMap[domain].totalIntelligence += intelCount;
+                        
+                        // Track enrichment status
+                        const enrichmentStatus = metadata.enrichment_status || 'not_enriched';
+                        if (enrichmentStatus !== 'not_enriched') {
+                            companiesMap[domain].enrichmentAttempted = true;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to parse metadata for company grouping:', contact.email);
+                }
+            });
+            
+            const companies = Object.values(companiesMap).sort((a, b) => b.contacts.length - a.contacts.length);
+            
+            if (companies.length > 0) {
+                document.getElementById('companies-section').style.display = 'block';
+                document.getElementById('company-count').textContent = `${companies.length} companies`;
+                
+                const companiesDisplay = document.getElementById('companies-display');
+                companiesDisplay.innerHTML = companies.map(company => `
+                    <div class="company-card">
+                        <div class="company-header" onclick="toggleCompanyDetails('${company.domain}')">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-building"></i> ${company.domain}
+                                        ${company.companyIntelligence ? '<i class="fas fa-brain ms-2 text-warning"></i>' : ''}
+                                    </h6>
+                                    <small>Click to view ${company.contacts.length} contact${company.contacts.length > 1 ? 's' : ''}</small>
+                                </div>
+                                <div class="company-stats">
+                                    <span class="stat-badge">${company.contacts.length} People</span>
+                                    <span class="stat-badge">${company.totalIntelligence} Intel Points</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="company-content" id="company-${company.domain}">
+                            ${company.companyIntelligence ? `
+                                <div class="intelligence-card">
+                                    <h6><i class="fas fa-brain"></i> Company Intelligence</h6>
+                                    ${Object.entries(company.companyIntelligence).map(([key, value]) => 
+                                        `<strong>${key}:</strong> ${typeof value === 'object' ? JSON.stringify(value) : value}<br>`
+                                    ).join('')}
+                                </div>
+                            ` : `
+                                ${company.enrichmentAttempted ? `
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-search"></i> <strong>Company intelligence attempted but no data found</strong>
+                                        <br><small>This company was searched but no public information was available. This could be due to:</small>
+                                        <ul class="small mb-0">
+                                            <li>Google search rate limiting (429 errors)</li>
+                                            <li>Company has limited public presence</li>
+                                            <li>Private or stealth-mode company</li>
+                                            <li>Domain doesn't match company name</li>
+                                        </ul>
+                                    </div>
+                                ` : `
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle"></i> No company intelligence available. 
+                                        <small>Run Contact Augmentation to gather company data.</small>
+                                    </div>
+                                `}
+                            `}
+                            
+                            <h6><i class="fas fa-users"></i> People at ${company.domain}</h6>
+                            ${company.contacts.map(contact => {
+                                let intelligenceData = {};
+                                try {
+                                    if (contact.metadata) {
+                                        const metadata = typeof contact.metadata === 'string' ? JSON.parse(contact.metadata) : contact.metadata;
+                                        intelligenceData = metadata.intelligence_data || {};
+                                    }
+                                } catch (e) {
+                                    console.warn('Failed to parse metadata for person in company:', contact.email);
+                                }
+                                
+                                const hasPersonIntel = intelligenceData.person && intelligenceData.person !== null && Object.keys(intelligenceData.person).length > 0;
+                                const hasProfessionalIntel = intelligenceData.professional && intelligenceData.professional !== null && Object.keys(intelligenceData.professional).length > 0;
+                                
+                                return `
+                                    <div class="person-in-company">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <strong>${contact.name || contact.email}</strong>
+                                                <br><small class="text-muted">${contact.email}</small>
+                                                <br><small class="text-muted">Tier ${contact.trust_tier} • ${contact.frequency} emails</small>
+                                            </div>
+                                            <div>
+                                                ${hasPersonIntel ? '<span class="intelligence-badge">Personal</span>' : ''}
+                                                ${hasProfessionalIntel ? '<span class="intelligence-badge">Professional</span>' : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                document.getElementById('companies-section').style.display = 'none';
+            }
+        }
+
+        // Step 3: Enrich Contacts
+        async function enrichContacts() {
+            try {
+                showLoading('step3');
+                
+                const sources = [];
+                if (document.getElementById('enrich-linkedin').checked) sources.push('linkedin');
+                if (document.getElementById('enrich-twitter').checked) sources.push('twitter');
+                if (document.getElementById('enrich-company').checked) sources.push('company');
+                
+                const result = await makeApiCall('/intelligence/enrich-contacts', 'POST', {
+                    sources: sources
+                });
+                
+                hideLoading('step3');
+                updateStatus('step3', 'success', 'Completed');
+                showResults('step3');
+                
+                // Display enriched contacts
+                const enrichedContactsDiv = document.getElementById('enriched-contacts');
+                enrichedContacts = result.enriched_contacts || [];
+                
+                if (enrichedContacts.length > 0) {
+                    enrichedContactsDiv.innerHTML = enrichedContacts.map(contact => `
+                        <div class="contact-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${contact.name || contact.email}</strong>
+                                    <br><small class="text-muted">${contact.email}</small>
+                                </div>
+                                <span class="badge bg-success">Enriched</span>
+                            </div>
+                            <div class="contact-details" style="display: block;">
+                                ${contact.linkedin_data ? `<strong>LinkedIn:</strong> ${contact.linkedin_data.title} at ${contact.linkedin_data.company}<br>` : ''}
+                                ${contact.twitter_data ? `<strong>Twitter:</strong> @${contact.twitter_data.username}<br>` : ''}
+                                ${contact.company_data ? `<strong>Company:</strong> ${contact.company_data.name} (${contact.company_data.industry})<br>` : ''}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    enrichedContactsDiv.innerHTML = '<div class="alert alert-info">No enriched contacts found</div>';
+                }
+                
+                currentStep = 3;
+                
+            } catch (error) {
+                hideLoading('step3');
+                updateStatus('step3', 'error', 'Failed');
+                document.getElementById('step3-results').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Step 4: Import Emails
+        async function importEmails() {
+            try {
+                showLoading('step4');
+                
+                const settings = {
+                    import_sent: document.getElementById('import-sent').checked,
+                    import_received: document.getElementById('import-received').checked,
+                    import_threads: document.getElementById('import-threads').checked
+                };
+                
+                const result = await makeApiCall('/emails/sync', 'POST', settings);
+                
+                hideLoading('step4');
+                updateStatus('step4', 'success', 'Completed');
+                showResults('step4');
+                
+                // Display emails
+                const emailsList = document.getElementById('emails-list');
+                
+                if (result.stats) {
+                    // New format with stats
+                    emailsList.innerHTML = `
+                        <div class="alert alert-${result.test_mode ? 'info' : 'success'}">
+                            <strong>${result.test_mode ? 'Test Mode:' : 'Success!'}</strong> ${result.message}
+                            ${result.note ? `<br><small>${result.note}</small>` : ''}
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h5 class="text-primary">${result.stats.total_found}</h5>
+                                    <small class="text-muted">Emails Found</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h5 class="text-success">${result.stats.processed}</h5>
+                                    <small class="text-muted">Processed</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h5 class="text-warning">${result.stats.errors}</h5>
+                                    <small class="text-muted">Errors</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h5 class="text-info">${result.stats.days_synced}</h5>
+                                    <small class="text-muted">Days Synced</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="small text-muted">
+                            <strong>Sync Period:</strong> ${new Date(result.stats.cutoff_date).toLocaleDateString()} to ${new Date().toLocaleDateString()}
+                        </div>
+                    `;
+                    
+                    // Store emails for later steps (empty for test mode)
+                    emails = result.test_mode ? [] : result.emails || [];
+                    
+                } else {
+                    // Legacy format
+                    emails = result.emails || [];
+                    
+                    if (emails.length > 0) {
+                        emailsList.innerHTML = `
+                            <div class="alert alert-success">
+                                <strong>Success!</strong> Imported ${emails.length} emails
+                            </div>
+                            ${emails.slice(0, 10).map(email => `
+                                <div class="contact-item">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>${email.subject || 'No Subject'}</strong>
+                                            <br><small class="text-muted">From: ${email.from} | To: ${email.to}</small>
+                                        </div>
+                                        <small class="text-muted">${email.date}</small>
+                                    </div>
+                                </div>
+                            `).join('')}
+                            ${emails.length > 10 ? `<div class="text-center mt-3"><small class="text-muted">Showing first 10 of ${emails.length} emails</small></div>` : ''}
+                        `;
+                    } else {
+                        emailsList.innerHTML = '<div class="alert alert-info">No emails imported</div>';
+                    }
+                }
+                
+                currentStep = 4;
+                
+            } catch (error) {
+                hideLoading('step4');
+                updateStatus('step4', 'error', 'Failed');
+                document.getElementById('step4-results').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Step 5: Build Knowledge Tree
+        async function buildKnowledgeTree() {
+            try {
+                showLoading('step5');
+                
+                const analysisTypes = [];
+                if (document.getElementById('analyze-business').checked) analysisTypes.push('business');
+                if (document.getElementById('analyze-relationships').checked) analysisTypes.push('relationships');
+                if (document.getElementById('analyze-technical').checked) analysisTypes.push('technical');
+                if (document.getElementById('analyze-market').checked) analysisTypes.push('market');
+                
+                const result = await makeApiCall('/intelligence/build-knowledge-tree', 'POST', {
+                    analysis_types: analysisTypes,
+                    time_window_days: 30
+                });
+                
+                hideLoading('step5');
+                updateStatus('step5', 'success', 'Completed');
+                showResults('step5');
+                
+                // Display knowledge tree
+                const knowledgeTreeDisplay = document.getElementById('knowledge-tree-display');
+                knowledgeTree = result.knowledge_tree;
+                
+                if (knowledgeTree) {
+                    knowledgeTreeDisplay.innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>Success!</strong> Knowledge tree built with ${Object.keys(knowledgeTree.nodes || {}).length} nodes
+                        </div>
+                        <div class="knowledge-tree-node">
+                            <h6>Root Node</h6>
+                            <p>${knowledgeTree.summary || 'No summary available'}</p>
+                        </div>
+                        ${Object.entries(knowledgeTree.nodes || {}).slice(0, 5).map(([key, node]) => `
+                            <div class="knowledge-tree-node">
+                                <h6>${key}</h6>
+                                <p>${node.description || 'No description'}</p>
+                                <small class="text-muted">Type: ${node.type || 'Unknown'}</small>
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    knowledgeTreeDisplay.innerHTML = '<div class="alert alert-info">No knowledge tree data available</div>';
+                }
+                
+                currentStep = 5;
+                
+            } catch (error) {
+                hideLoading('step5');
+                updateStatus('step5', 'error', 'Failed');
+                document.getElementById('step5-results').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Step 6: Advanced Features
+        async function generatePredictions() {
+            try {
+                const result = await makeApiCall('/intelligence/predictions');
+                
+                const predictionsContent = document.getElementById('predictions-content');
+                if (result.predictions && result.predictions.length > 0) {
+                    predictionsContent.innerHTML = result.predictions.map(prediction => `
+                        <div class="prediction-item">
+                            <h6>${prediction.title}</h6>
+                            <p>${prediction.description}</p>
+                            <small>Confidence: ${prediction.confidence}% | Timeframe: ${prediction.timeframe}</small>
+                        </div>
+                    `).join('');
+                } else {
+                    predictionsContent.innerHTML = '<div class="alert alert-info">No predictions available</div>';
+                }
+                
+                document.getElementById('step6-results').style.display = 'block';
+                updateStatus('step6', 'success', 'Predictions Generated');
+                
+            } catch (error) {
+                document.getElementById('predictions-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function getInsights() {
+            try {
+                const result = await makeApiCall('/intelligence/insights');
+                
+                const insightsContent = document.getElementById('insights-content');
+                if (result.insights && result.insights.length > 0) {
+                    insightsContent.innerHTML = result.insights.map(insight => `
+                        <div class="insight-item">
+                            <h6>${insight.title}</h6>
+                            <p>${insight.description}</p>
+                            <small>Category: ${insight.category} | Priority: ${insight.priority}</small>
+                        </div>
+                    `).join('');
+                } else {
+                    insightsContent.innerHTML = '<div class="alert alert-info">No insights available</div>';
+                }
+                
+                document.getElementById('step6-results').style.display = 'block';
+                updateStatus('step6', 'success', 'Insights Generated');
+                
+            } catch (error) {
+                document.getElementById('insights-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function getRelationships() {
+            try {
+                const result = await makeApiCall('/intelligence/relationships');
+                
+                const relationshipsContent = document.getElementById('relationships-content');
+                if (result.relationships && result.relationships.length > 0) {
+                    relationshipsContent.innerHTML = result.relationships.map(rel => `
+                        <div class="contact-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${rel.person1} ↔ ${rel.person2}</strong>
+                                    <br><small class="text-muted">${rel.relationship_type}</small>
+                                </div>
+                                <span class="badge bg-info">${rel.strength}</span>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    relationshipsContent.innerHTML = '<div class="alert alert-info">No relationships found</div>';
+                }
+                
+                document.getElementById('step6-results').style.display = 'block';
+                updateStatus('step6', 'success', 'Relationships Loaded');
+                
+            } catch (error) {
+                document.getElementById('relationships-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function deepAugmentation() {
+            try {
+                const result = await makeApiCall('/intelligence/augment-knowledge-tree', 'POST');
+                
+                const augmentationContent = document.getElementById('augmentation-content');
+                if (result.augmented_tree) {
+                    augmentationContent.innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>Success!</strong> Knowledge tree augmented with ${result.new_nodes || 0} new nodes
+                        </div>
+                        <div class="knowledge-tree-node">
+                            <h6>Augmentation Summary</h6>
+                            <p>${result.summary || 'No summary available'}</p>
+                        </div>
+                    `;
+                } else {
+                    augmentationContent.innerHTML = '<div class="alert alert-info">No augmentation data available</div>';
+                }
+                
+                document.getElementById('step6-results').style.display = 'block';
+                updateStatus('step6', 'success', 'Augmentation Complete');
+                
+            } catch (error) {
+                document.getElementById('augmentation-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // System Health Check
+        async function checkSystemHealth() {
+            try {
+                const result = await makeApiCall('/system/health');
+                
+                // Update summary
+                document.getElementById('last-health-check').textContent = new Date().toLocaleTimeString();
+                document.getElementById('system-status-text').textContent = result.status.toUpperCase();
+                document.getElementById('system-status-text').className = 
+                    result.status === 'healthy' ? 'text-success' : 'text-warning';
+                
+                // Show detailed results
+                const healthDetails = document.getElementById('health-details');
+                const healthComponents = document.getElementById('health-components');
+                
+                healthDetails.style.display = 'block';
+                healthComponents.innerHTML = `
+                    <div class="alert alert-${result.status === 'healthy' ? 'success' : 'warning'}">
+                        <h6>System Status: ${result.status.toUpperCase()}</h6>
+                        <div class="row">
+                            ${Object.entries(result.components || {}).map(([component, status]) => `
+                                <div class="col-md-6 mb-2">
+                                    <strong>${component}:</strong> 
+                                    <span class="badge bg-${status ? 'success' : 'danger'}">${status ? 'OK' : 'ERROR'}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                
+            } catch (error) {
+                document.getElementById('system-status-text').textContent = 'ERROR';
+                document.getElementById('system-status-text').className = 'text-danger';
+                
+                const healthDetails = document.getElementById('health-details');
+                const healthComponents = document.getElementById('health-components');
+                
+                healthDetails.style.display = 'block';
+                healthComponents.innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Health Check Failed:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Comprehensive System Flush
+        async function flushSystem() {
+            // Show comprehensive confirmation dialog
+            const confirmed = confirm(
+                "🚨 COMPLETE SYSTEM FLUSH 🚨\n\n" +
+                "This will PERMANENTLY DELETE ALL DATA:\n\n" +
+                "✗ All contacts and trust relationships\n" +
+                "✗ Email analysis data and cache\n" +
+                "✗ Knowledge trees and insights\n" +
+                "✗ OAuth credentials and tokens\n" +
+                "✗ Database records (PostgreSQL)\n" +
+                "✗ Cache data (Redis)\n" +
+                "✗ Vector embeddings (ChromaDB)\n" +
+                "✗ Graph relationships (Neo4j)\n" +
+                "✗ Session data\n\n" +
+                "⚠️ THIS ACTION CANNOT BE UNDONE! ⚠️\n\n" +
+                "Type 'FLUSH' in the next prompt to confirm..."
+            );
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            // Secondary confirmation requiring typed input
+            const confirmText = prompt(
+                "To confirm complete data deletion, type exactly: FLUSH\n\n" +
+                "This is your last chance to cancel!"
+            );
+            
+            if (confirmText !== 'FLUSH') {
+                alert('Flush cancelled - text did not match "FLUSH"');
+                return;
+            }
+            
+            try {
+                // Disable button and show loading
+                const flushBtn = document.getElementById('flush-system-btn');
+                const originalText = flushBtn.innerHTML;
+                flushBtn.disabled = true;
+                flushBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> FLUSHING ALL DATA...';
+                
+                // Call comprehensive flush API
+                const result = await makeApiCall('/system/flush', 'POST');
+                
+                // Show detailed results
+                const flushResults = document.getElementById('flush-results');
+                const flushDetails = document.getElementById('flush-details');
+                
+                flushResults.style.display = 'block';
+                flushDetails.innerHTML = `
+                    <strong>Flush Summary:</strong>
+                    <ul class="mb-2">
+                        ${result.cleared?.map(item => `<li>${item}</li>`).join('') || '<li>System reset completed</li>'}
+                    </ul>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <strong>User Email:</strong> ${result.user_email || 'Unknown'}<br>
+                            <strong>User ID:</strong> ${result.user_id || 'Unknown'}
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Timestamp:</strong> ${new Date(result.timestamp).toLocaleString()}
+                        </div>
+                    </div>
+                `;
+                
+                // Reset all step statuses
+                for (let i = 1; i <= 6; i++) {
+                    updateStatus(`step${i}`, 'pending', 'Pending');
+                    const resultsDiv = document.getElementById(`step${i}-results`);
+                    if (resultsDiv) resultsDiv.style.display = 'none';
+                }
+                
+                // Clear global variables
+                currentStep = 0;
+                contacts = [];
+                enrichedContacts = [];
+                emails = [];
+                knowledgeTree = null;
+                
+                // Re-enable button
+                flushBtn.disabled = false;
+                flushBtn.innerHTML = originalText;
+                
+                // Auto-refresh authentication status
+                setTimeout(() => {
+                    checkAuthStatus();
+                }, 1000);
+                
+                // Ask about re-authentication
+                setTimeout(() => {
+                    if (confirm("✅ System flushed successfully!\n\nWould you like to re-authenticate with Google now?")) {
+                        window.location.href = '/auth/google';
+                    }
+                }, 3000);
+                
+            } catch (error) {
+                // Show error with details
+                const flushResults = document.getElementById('flush-results');
+                const flushDetails = document.getElementById('flush-details');
+                
+                flushResults.style.display = 'block';
+                flushResults.className = 'mt-3';
+                flushResults.innerHTML = `
+                    <div class="alert alert-danger" role="alert">
+                        <h6><i class="fas fa-exclamation-triangle"></i> Flush Failed</h6>
+                        <div id="flush-details">
+                            <strong>Error:</strong> ${error.message}<br>
+                            <small class="text-muted">
+                                Some data may have been partially cleared. 
+                                You may need to manually clear browser data and restart the application.
+                            </small>
+                        </div>
+                    </div>
+                `;
+                
+                // Re-enable button
+                const flushBtn = document.getElementById('flush-system-btn');
+                flushBtn.disabled = false;
+                flushBtn.innerHTML = originalText;
+            }
+        }
+
+        // Refresh Authentication Status
+        async function refreshAuthStatus() {
+            const btn = document.querySelector('button[onclick="refreshAuthStatus()"]');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+            
+            await checkAuthStatus();
+            
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }, 1000);
+        }
+
+        // Clear Browser Cache
+        function clearBrowserCache() {
+            const confirmed = confirm(
+                "This will:\n" +
+                "• Clear browser cache and cookies\n" +
+                "• Clear local storage\n" +
+                "• Reload the page\n\n" +
+                "Continue?"
+            );
+            
+            if (confirmed) {
+                // Clear various browser storage
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.getRegistrations().then(registrations => {
+                        registrations.forEach(registration => registration.unregister());
+                    });
+                }
+                
+                if ('caches' in window) {
+                    caches.keys().then(names => {
+                        names.forEach(name => caches.delete(name));
+                    });
+                }
+                
+                localStorage.clear();
+                sessionStorage.clear();
+                
+                // Force reload with cache bypass
+                location.reload(true);
+            }
+        }
+
+        // Old flush function removal - replace with flushSystem
+        // Flush Database and Start Clean - DEPRECATED: Use flushSystem() instead
+        async function flushDatabase() {
+            // Redirect to new comprehensive flush
+            alert("⚠️ This function has been upgraded to a comprehensive system flush.\n\nRedirecting to the new flush system...");
+            await flushSystem();
+        }
+
+        // Utility function for contact details toggle
+        function toggleContactDetails(contactId) {
+            const details = document.getElementById(`contact-${contactId}`);
+            if (details.style.display === 'block') {
+                details.style.display = 'none';
+            } else {
+                details.style.display = 'block';
+            }
+        }
+        
+        // Utility function for company details toggle
+        function toggleCompanyDetails(companyDomain) {
+            const details = document.getElementById(`company-${companyDomain}`);
+            if (details.style.display === 'block') {
+                details.style.display = 'none';
+            } else {
+                details.style.display = 'block';
+            }
+        }
+
+        // Check authentication status
+        async function checkAuthStatus() {
+            try {
+                // Check URL parameters for login status
+                const urlParams = new URLSearchParams(window.location.search);
+                const loginSuccess = urlParams.get('login_success') === 'true';
+                const testMode = urlParams.get('test_mode') === 'true';
+                const authenticated = urlParams.get('authenticated') === 'true';
+                
+                // Try to get auth status from API
+                let authResult = null;
+                try {
+                    authResult = await makeApiCall('/auth/status');
+                } catch (error) {
+                    console.log('Auth API not available:', error.message);
+                }
+                
+                const authStatusDiv = document.getElementById('auth-status');
+                const authStatusText = document.getElementById('auth-status-text');
+                const authDetails = document.getElementById('auth-details');
+                const loginBtn = document.getElementById('login-btn');
+                const logoutBtn = document.getElementById('logout-btn');
+                
+                if (loginSuccess || authenticated || (authResult && authResult.authenticated)) {
+                    // User is authenticated
+                    authStatusDiv.className = 'alert alert-success';
+                    authStatusText.innerHTML = '<i class="fas fa-check-circle"></i> Authenticated';
+                    
+                    if (authResult && authResult.user) {
+                        authDetails.textContent = `Logged in as: ${authResult.user.email}`;
+                    } else if (testMode) {
+                        authDetails.textContent = 'Test mode - Limited functionality without database';
+                    } else {
+                        authDetails.textContent = 'Session authenticated - Dashboard fully functional';
+                    }
+                    
+                    loginBtn.style.display = 'none';
+                    logoutBtn.style.display = 'inline-block';
+                    
+                } else {
+                    // User not authenticated
+                    authStatusDiv.className = 'alert alert-warning';
+                    authStatusText.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Not Authenticated';
+                    authDetails.textContent = 'Login with Google to access Gmail analysis features';
+                    
+                    loginBtn.style.display = 'inline-block';
+                    logoutBtn.style.display = 'none';
+                }
+                
+                // Clear URL parameters to clean up the URL
+                if (loginSuccess || testMode || authenticated) {
+                    const cleanUrl = window.location.origin + window.location.pathname;
+                    window.history.replaceState({}, document.title, cleanUrl);
+                }
+                
+            } catch (error) {
+                console.error('Error checking auth status:', error);
+                
+                const authStatusDiv = document.getElementById('auth-status');
+                const authStatusText = document.getElementById('auth-status-text');
+                const authDetails = document.getElementById('auth-details');
+                
+                authStatusDiv.className = 'alert alert-secondary';
+                authStatusText.innerHTML = '<i class="fas fa-question-circle"></i> Unknown';
+                authDetails.textContent = 'Cannot determine authentication status';
+            }
+        }
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Strategic Intelligence System Dashboard loaded');
+            
+            // Check authentication status first
+            checkAuthStatus();
+            
+            // Check system health on load
+            checkSystemHealth();
+        });
+    </script>
+</body>
+</html>
