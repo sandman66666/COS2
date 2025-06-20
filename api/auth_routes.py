@@ -305,7 +305,9 @@ def get_token():
 @auth_bp.route('/debug/session')
 def debug_session():
     """Debug session information - only available in development"""
-    if current_app.config.get('ENV') != 'development':
+    # Allow in development mode or when ENV is not explicitly set to production
+    env = current_app.config.get('ENV', 'development')
+    if env == 'production':
         return jsonify({'error': 'Not available in production'}), 403
         
     return jsonify({
@@ -314,5 +316,6 @@ def debug_session():
         'user_id': session.get('user_id'),
         'authenticated': session.get('authenticated'),
         'session_keys': list(session.keys()),
-        'headers': dict(request.headers)
+        'headers': dict(request.headers),
+        'environment': env
     })

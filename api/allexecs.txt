@@ -1,0 +1,1581 @@
+"""
+Enhanced Strategic Intelligence System
+====================================
+An enhanced version of the original strategic intelligence system that adapts to
+different executive roles while maintaining the core functionality.
+
+This version adds:
+1. Support for multiple executive roles (CEO, CTO, CMO, CFO, etc.)
+2. Role-specific intelligence dimensions and data
+3. Unified code structure for all executive roles
+4. Easy configuration through a simple role selector
+"""
+
+import json
+import asyncio
+from typing import Dict, List, Optional, Any, Union
+from datetime import datetime
+from enum import Enum
+
+class ExecutiveRole(Enum):
+    """Enum representing different executive roles in the organization"""
+    CEO = "Chief Executive Officer"
+    CTO = "Chief Technology Officer"
+    CMO = "Chief Marketing Officer"
+    CFO = "Chief Financial Officer"
+    COO = "Chief Operating Officer"
+    CPO = "Chief Product Officer"
+    CSO = "Chief Strategy Officer"
+    CHRO = "Chief Human Resources Officer"
+
+class RoleSpecificDimensions:
+    """Role-specific dimensions and parameters for intelligence customization"""
+    
+    def __init__(self, role: ExecutiveRole):
+        self.role = role
+        self._initialize_dimensions()
+    
+    def _initialize_dimensions(self):
+        """Initialize role-specific dimensions and parameters"""
+        
+        # Base dimensions that all roles share
+        self.base_dimensions = {
+            "strategic_dimensions": [
+                "business_development_potential",
+                "competitive_intelligence_value", 
+                "partnership_synergy_score",
+                "investment_connection_relevance"
+            ],
+            "strategic_areas": [
+                "market_positioning",
+                "business_model_evolution",
+                "competitive_landscape"
+            ],
+            "decision_frameworks": [
+                "opportunity_cost_analysis",
+                "strategic_alignment_assessment",
+                "risk_exposure_evaluation"
+            ]
+        }
+        
+        # Role-specific dimension overrides
+        self.role_dimensions = {
+            ExecutiveRole.CEO: {
+                "strategic_dimensions": [
+                    "business_development_potential",
+                    "competitive_intelligence_value", 
+                    "industry_influence_level",
+                    "partnership_synergy_score",
+                    "talent_network_value",
+                    "investment_connection_relevance",
+                    "market_access_enablement"
+                ],
+                "strategic_areas": [
+                    "ai_music_creation_market",
+                    "audio_technology_innovation",
+                    "music_distribution_platforms",
+                    "artist_collaboration_tools",
+                    "music_rights_management",
+                    "music_consumption_trends"
+                ],
+                "decision_frameworks": [
+                    "opportunity_cost_analysis",
+                    "strategic_alignment_assessment",
+                    "resource_allocation_optimization",
+                    "competitive_advantage_analysis",
+                    "risk_exposure_evaluation",
+                    "timing_sensitivity_assessment"
+                ]
+            },
+            ExecutiveRole.CTO: {
+                "strategic_dimensions": [
+                    "technology_expertise_relevance",
+                    "innovation_partnership_potential",
+                    "technical_talent_connection",
+                    "technology_intelligence_value",
+                    "technical_infrastructure_synergy",
+                    "research_collaboration_potential",
+                    "technical_risk_assessment_value"
+                ],
+                "strategic_areas": [
+                    "ai_model_development",
+                    "music_generation_technology",
+                    "audio_processing_innovations",
+                    "cloud_infrastructure_solutions",
+                    "voice_analysis_technology",
+                    "technical_scalability_approaches"
+                ],
+                "decision_frameworks": [
+                    "technical_feasibility_assessment",
+                    "build_vs_buy_analysis",
+                    "technology_stack_evaluation",
+                    "technical_debt_management",
+                    "research_investment_prioritization",
+                    "infrastructure_scaling_strategy"
+                ]
+            },
+            ExecutiveRole.CMO: {
+                "strategic_dimensions": [
+                    "brand_partnership_potential",
+                    "market_intelligence_value",
+                    "audience_access_enablement",
+                    "channel_relationship_synergy",
+                    "marketing_talent_connection",
+                    "promotional_collaboration_potential",
+                    "market_positioning_insight"
+                ],
+                "strategic_areas": [
+                    "artist_acquisition_channels",
+                    "music_consumer_demographics",
+                    "content_creation_trends",
+                    "music_platform_engagement",
+                    "creator_economy_developments",
+                    "music_monetization_models"
+                ],
+                "decision_frameworks": [
+                    "audience_growth_strategy",
+                    "brand_positioning_assessment",
+                    "channel_optimization_analysis",
+                    "campaign_effectiveness_evaluation",
+                    "customer_acquisition_cost_analysis",
+                    "content_strategy_alignment"
+                ]
+            },
+            ExecutiveRole.CFO: {
+                "strategic_dimensions": [
+                    "investment_relationship_value",
+                    "financial_partnership_potential",
+                    "capital_access_enablement",
+                    "financial_intelligence_value",
+                    "cost_synergy_potential",
+                    "revenue_model_insight",
+                    "financial_risk_assessment"
+                ],
+                "strategic_areas": [
+                    "music_industry_investment_trends",
+                    "ai_technology_valuation_metrics",
+                    "subscription_revenue_models",
+                    "creator_monetization_approaches",
+                    "music_licensing_economics",
+                    "capital_efficiency_benchmarks"
+                ],
+                "decision_frameworks": [
+                    "capital_allocation_optimization",
+                    "financial_risk_assessment",
+                    "unit_economics_analysis",
+                    "funding_strategy_evaluation",
+                    "cost_structure_optimization",
+                    "revenue_model_assessment"
+                ]
+            },
+            ExecutiveRole.COO: {
+                "strategic_dimensions": [
+                    "operational_efficiency_insight",
+                    "supply_chain_relationship_value",
+                    "scaling_expertise_relevance",
+                    "operational_intelligence_value",
+                    "process_optimization_synergy",
+                    "talent_operations_connection",
+                    "organizational_structure_insight"
+                ],
+                "strategic_areas": [
+                    "content_delivery_infrastructure",
+                    "creative_workflow_optimization",
+                    "talent_onboarding_processes",
+                    "quality_assurance_systems",
+                    "service_delivery_models",
+                    "operational_scalability_approaches"
+                ],
+                "decision_frameworks": [
+                    "operational_efficiency_analysis",
+                    "process_optimization_assessment",
+                    "organizational_structure_evaluation",
+                    "resource_utilization_optimization",
+                    "service_delivery_model_assessment",
+                    "scaling_strategy_evaluation"
+                ]
+            },
+            ExecutiveRole.CPO: {
+                "strategic_dimensions": [
+                    "product_innovation_insight",
+                    "user_experience_expertise",
+                    "feature_prioritization_value",
+                    "product_intelligence_relevance",
+                    "technology_integration_synergy",
+                    "market_need_assessment",
+                    "product_talent_connection"
+                ],
+                "strategic_areas": [
+                    "music_creation_interfaces",
+                    "collaborative_tools_innovation",
+                    "ai_music_generation_features",
+                    "user_onboarding_experiences",
+                    "creator_tool_ecosystems",
+                    "music_sharing_platforms"
+                ],
+                "decision_frameworks": [
+                    "product_roadmap_prioritization",
+                    "feature_impact_assessment",
+                    "user_experience_optimization",
+                    "product_market_fit_evaluation",
+                    "competitive_feature_analysis",
+                    "technology_integration_strategy"
+                ]
+            },
+            ExecutiveRole.CSO: {
+                "strategic_dimensions": [
+                    "strategic_planning_expertise",
+                    "market_opportunity_assessment",
+                    "competitive_positioning_insight",
+                    "growth_strategy_value",
+                    "strategic_partnership_potential",
+                    "industry_foresight_relevance",
+                    "strategic_risk_evaluation"
+                ],
+                "strategic_areas": [
+                    "music_industry_transformation",
+                    "creator_economy_evolution",
+                    "ai_disruption_vectors",
+                    "platform_business_models",
+                    "music_monetization_futures",
+                    "talent_marketplace_dynamics"
+                ],
+                "decision_frameworks": [
+                    "market_entry_strategy",
+                    "competitive_positioning_assessment",
+                    "growth_vector_analysis",
+                    "strategic_partnership_evaluation",
+                    "business_model_innovation",
+                    "industry_convergence_opportunities"
+                ]
+            },
+            ExecutiveRole.CHRO: {
+                "strategic_dimensions": [
+                    "talent_acquisition_connection",
+                    "organizational_culture_insight",
+                    "leadership_development_expertise",
+                    "talent_retention_strategy",
+                    "compensation_structure_value",
+                    "organizational_design_relevance",
+                    "talent_intelligence_assessment"
+                ],
+                "strategic_areas": [
+                    "creative_talent_markets",
+                    "technical_skill_development",
+                    "remote_work_effectiveness",
+                    "organizational_culture_evolution",
+                    "leadership_development_approaches",
+                    "diversity_and_inclusion_strategies"
+                ],
+                "decision_frameworks": [
+                    "talent_acquisition_strategy",
+                    "organizational_culture_assessment",
+                    "compensation_structure_optimization",
+                    "leadership_development_evaluation",
+                    "team_structure_analysis",
+                    "employee_experience_enhancement"
+                ]
+            }
+        }
+    
+    def get_dimensions(self) -> Dict:
+        """Get dimensions for the current role"""
+        # Start with base dimensions
+        dimensions = self.base_dimensions.copy()
+        
+        # Override with role-specific dimensions if available
+        if self.role in self.role_dimensions:
+            for key, value in self.role_dimensions[self.role].items():
+                dimensions[key] = value
+        
+        return dimensions
+
+class StrategicRelationshipAgent:
+    """Agent that analyzes relationships from an executive's strategic lens"""
+    
+    def __init__(self, role_dimensions: RoleSpecificDimensions):
+        self.role_dimensions = role_dimensions
+    
+    async def analyze_strategic_relationship(self, contact: Dict, company_context: Dict) -> Dict:
+        """Analyze a contact's strategic value to the company's mission"""
+        
+        # Get dimensions relevant to the executive's role
+        strategic_dimensions = self.role_dimensions.get_dimensions()["strategic_dimensions"]
+        
+        # Build comprehensive strategic profile
+        strategic_profile = {}
+        
+        for dimension in strategic_dimensions:
+            analysis = await self._analyze_strategic_dimension(
+                contact, company_context, dimension
+            )
+            strategic_profile[dimension] = analysis
+        
+        # Add executive-level relationship recommendation
+        strategic_profile["executive_action"] = await self._generate_executive_action(
+            contact, strategic_profile
+        )
+        
+        return strategic_profile
+    
+    async def _analyze_strategic_dimension(self, contact: Dict, company_context: Dict, dimension: str) -> Dict:
+        """Analyze a contact along a specific strategic dimension"""
+        # In a real implementation, this would use Claude or another LLM
+        # Here we'll simulate the analysis with sample data
+        
+        # Create a sample analysis based on dimension and contact
+        analysis = {
+            "score": 0.7,  # Sample score
+            "insights": [f"Sample insight for {dimension}"],
+            "relevance": f"Sample relevance explanation for {dimension}"
+        }
+        
+        # Add dimension-specific analysis
+        if dimension == "business_development_potential":
+            analysis["potential_opportunities"] = [
+                f"Collaboration on {company_context.get('focus_area', 'AI music')} initiatives",
+                f"Joint venture for new market entry"
+            ]
+        elif dimension == "competitive_intelligence_value":
+            analysis["intelligence_areas"] = [
+                f"Market trends in {contact.get('industry', 'music tech')}",
+                f"Competitive positioning insights"
+            ]
+        elif dimension == "technology_expertise_relevance":
+            analysis["expertise_areas"] = [
+                f"AI model development",
+                f"Audio processing technologies"
+            ]
+        elif dimension == "market_intelligence_value":
+            analysis["market_insights"] = [
+                f"Consumer behavior trends",
+                f"Channel effectiveness data"
+            ]
+            
+        return analysis
+    
+    async def _generate_executive_action(self, contact: Dict, strategic_profile: Dict) -> Dict:
+        """Generate executive-level relationship recommendations"""
+        # In a real implementation, this would use Claude or another LLM
+        # Here we'll simulate with role-specific recommendations
+        
+        # Get the current role
+        role = self.role_dimensions.role
+        
+        # Create role-specific action plan
+        role_emphasis = {
+            ExecutiveRole.CEO: "strategic partnership",
+            ExecutiveRole.CTO: "technical collaboration",
+            ExecutiveRole.CMO: "marketing alliance",
+            ExecutiveRole.CFO: "financial partnership",
+            ExecutiveRole.COO: "operational efficiency",
+            ExecutiveRole.CPO: "product integration",
+            ExecutiveRole.CSO: "strategic initiative",
+            ExecutiveRole.CHRO: "talent development"
+        }
+        
+        emphasis = role_emphasis.get(role, "strategic partnership")
+        
+        action_plan = {
+            "immediate": f"Schedule a meeting to discuss {emphasis} opportunities",
+            "medium_term": f"Develop a structured {emphasis} proposal based on mutual interests",
+            "long_term": f"Establish ongoing {emphasis} relationship with quarterly check-ins"
+        }
+        
+        return action_plan
+
+class CompetitiveLandscapeAgent:
+    """Agent that maps your company's position in the competitive landscape"""
+    
+    def __init__(self, role_dimensions: RoleSpecificDimensions):
+        self.role_dimensions = role_dimensions
+    
+    async def map_strategic_landscape(self, company_data: Dict) -> Dict:
+        """Map the competitive landscape relevant to YOUR company's strategy"""
+        
+        # Get strategic areas relevant to the executive's role
+        strategic_areas = self.role_dimensions.get_dimensions()["strategic_areas"]
+        
+        landscape = {}
+        
+        for area in strategic_areas:
+            landscape[area] = await self._analyze_strategic_area(area)
+            
+            # Map competitors in this space
+            landscape[area]["key_players"] = await self._identify_key_players(area)
+            
+            # Position YOUR company
+            landscape[area]["our_position"] = await self._evaluate_our_position(
+                area, company_data
+            )
+            
+            # Identify strategic opportunities
+            landscape[area]["strategic_opportunities"] = await self._identify_opportunities(
+                area, landscape[area]["our_position"], landscape[area]["key_players"]
+            )
+        
+        return landscape
+    
+    async def _analyze_strategic_area(self, area: str) -> Dict:
+        """Analyze a specific strategic area"""
+        # In a real implementation, this would use Claude or another LLM
+        # Here we'll simulate with sample data
+        
+        # Generate sample market size and growth
+        import random
+        market_size = f"${random.randint(1, 10)}.{random.randint(1, 9)}B"
+        growth_rate = f"{random.randint(20, 50)}% YoY"
+        
+        return {
+            "market_size": f"{market_size} with {growth_rate} growth",
+            "key_trends": [
+                f"Trend 1 for {area}",
+                f"Trend 2 for {area}",
+                f"Trend 3 for {area}"
+            ],
+            "market_stage": random.choice(["Emerging", "Growth", "Mature", "Declining"])
+        }
+    
+    async def _identify_key_players(self, area: str) -> List[Dict]:
+        """Identify key players in a strategic area"""
+        # Sample competitors relevant to music AI
+        possible_players = [
+            {"name": "OpenAI (Suno)", "position": "Technology leader with mainstream awareness"},
+            {"name": "Soundful", "position": "Established in commercial music generation"},
+            {"name": "AIVA", "position": "Pioneer in AI composition for media"},
+            {"name": "Endel", "position": "Functional music generation leader"},
+            {"name": "Jukebox (OpenAI)", "position": "Advanced raw audio generation research"},
+            {"name": "Spotify", "position": "Distribution platform with AI features"},
+            {"name": "Apple Music", "position": "Major distribution platform"},
+            {"name": "SoundCloud", "position": "Creator-focused distribution platform"}
+        ]
+        
+        # Select a few random players
+        import random
+        selected_indices = random.sample(range(len(possible_players)), 3)
+        
+        players = []
+        for idx in selected_indices:
+            player = possible_players[idx].copy()
+            
+            # Add role-specific insights
+            role = self.role_dimensions.role
+            
+            if role == ExecutiveRole.CEO:
+                player["threat_level"] = random.choice(["Low", "Medium", "High"])
+                player["potential_response"] = f"Strategic response for {player['name']}"
+            elif role == ExecutiveRole.CTO:
+                player["technical_capabilities"] = f"Technical capability assessment for {player['name']}"
+                player["innovation_rate"] = random.choice(["Slow", "Moderate", "Rapid"])
+            elif role == ExecutiveRole.CMO:
+                player["brand_strength"] = random.choice(["Weak", "Moderate", "Strong"])
+                player["audience_overlap"] = f"{random.randint(10, 70)}% overlap"
+            elif role == ExecutiveRole.CFO:
+                player["estimated_runway"] = f"{random.randint(6, 30)} months"
+                player["funding_status"] = random.choice(["Bootstrapped", "Seed", "Series A", "Series B", "Series C"])
+            
+            players.append(player)
+        
+        return players
+    
+    async def _evaluate_our_position(self, area: str, company_data: Dict) -> Dict:
+        """Evaluate our company's position in a strategic area"""
+        # Generate sample position data
+        import random
+        
+        position = {
+            "market_share": f"{random.randint(1, 10)}.{random.randint(1, 9)}%",
+            "growth_rate": f"{random.randint(50, 100)}% (outpacing market)",
+            "competitive_advantage": company_data.get("advantage", "Artist-centric approach with human-AI collaboration focus"),
+            "vulnerability": company_data.get("vulnerability", "Scale compared to major tech initiatives")
+        }
+        
+        # Add role-specific position insights
+        role = self.role_dimensions.role
+        
+        if role == ExecutiveRole.CTO:
+            position["technical_differentiation"] = company_data.get("technical_differentiation", "Proprietary voice modeling technology")
+            position["engineering_velocity"] = company_data.get("engineering_velocity", "8 deployments per week")
+        elif role == ExecutiveRole.CMO:
+            position["brand_perception"] = company_data.get("brand_perception", "Authentic, artist-friendly technology")
+            position["customer_acquisition_cost"] = company_data.get("cac", "$45 per creator")
+        elif role == ExecutiveRole.CFO:
+            position["unit_economics"] = company_data.get("unit_economics", "$32 LTV/$12 CAC ratio")
+            position["capital_efficiency"] = company_data.get("capital_efficiency", "1.8x revenue per dollar raised vs. peers")
+        
+        return position
+    
+    async def _identify_opportunities(self, area: str, our_position: Dict, key_players: List[Dict]) -> List[Dict]:
+        """Identify strategic opportunities in this area"""
+        # Generate sample opportunities based on area and role
+        opportunities = []
+        
+        if area.lower() == "ai_music_creation_market":
+            opportunities.append({
+                "title": "Artist collaboration marketplace",
+                "window": "6-9 months before competition solidifies",
+                "resource_requirements": "Medium",
+                "differentiation_potential": "High"
+            })
+        elif "distribution" in area.lower():
+            opportunities.append({
+                "title": "Direct export integration with major platforms",
+                "window": "3-6 months to establish first-mover advantage",
+                "resource_requirements": "Medium",
+                "differentiation_potential": "Medium"
+            })
+        else:
+            opportunities.append({
+                "title": f"Strategic opportunity in {area}",
+                "window": "Next 3-6 months",
+                "resource_requirements": "Medium",
+                "differentiation_potential": "Medium"
+            })
+        
+        # Add role-specific opportunity insights
+        role = self.role_dimensions.role
+        
+        for opportunity in opportunities:
+            if role == ExecutiveRole.CTO:
+                opportunity["technical_feasibility"] = random.choice(["Challenging", "Moderate", "Straightforward"])
+                opportunity["development_timeline"] = f"{random.randint(2, 8)} months"
+            elif role == ExecutiveRole.CMO:
+                opportunity["marketing_angle"] = f"Marketing angle for {opportunity['title']}"
+                opportunity["target_audience"] = f"Primary audience for {opportunity['title']}"
+            elif role == ExecutiveRole.CFO:
+                opportunity["revenue_potential"] = f"${random.randint(100, 1000)}K annual"
+                opportunity["investment_required"] = f"${random.randint(50, 250)}K"
+        
+        return opportunities
+
+class DecisionIntelligenceAgent:
+    """Agent that provides executive-level decision intelligence"""
+    
+    def __init__(self, role_dimensions: RoleSpecificDimensions):
+        self.role_dimensions = role_dimensions
+    
+    async def analyze_decision_context(self, decision_area: str, context_data: Dict) -> Dict:
+        """Provide strategic decision intelligence for a specific area"""
+        
+        # Get decision frameworks relevant to the executive's role
+        frameworks = self.role_dimensions.get_dimensions()["decision_frameworks"]
+        
+        decision_intelligence = {}
+        
+        for framework in frameworks:
+            analysis = await self._apply_decision_framework(
+                decision_area, context_data, framework
+            )
+            decision_intelligence[framework] = analysis
+        
+        # Generate strategic options with tradeoffs
+        decision_intelligence["strategic_options"] = await self._generate_strategic_options(
+            decision_area, decision_intelligence
+        )
+        
+        # Provide executive-level considerations
+        decision_intelligence["executive_considerations"] = await self._executive_level_factors(
+            decision_area, context_data
+        )
+        
+        return decision_intelligence
+    
+    async def _apply_decision_framework(self, decision_area: str, context_data: Dict, framework: str) -> Dict:
+        """Apply a specific decision framework to a decision area"""
+        # In a real implementation, this would use Claude or another LLM
+        # Here we'll simulate with sample data
+        
+        # Base analysis for any framework
+        analysis = {
+            "summary": f"Analysis of {decision_area} using {framework}",
+            "key_insights": [
+                f"Insight 1 for {decision_area} using {framework}",
+                f"Insight 2 for {decision_area} using {framework}"
+            ]
+        }
+        
+        # Add framework-specific analysis
+        if framework == "opportunity_cost_analysis":
+            analysis["alternative_uses"] = [
+                f"Alternative 1 for resources in {decision_area}",
+                f"Alternative 2 for resources in {decision_area}"
+            ]
+        elif framework == "strategic_alignment_assessment":
+            analysis["alignment_score"] = 0.82
+            analysis["alignment_factors"] = [
+                f"Alignment factor 1 for {decision_area}",
+                f"Alignment factor 2 for {decision_area}"
+            ]
+        elif framework == "technical_feasibility_assessment":
+            analysis["feasibility_score"] = 0.75
+            analysis["technical_challenges"] = [
+                "Integration complexity",
+                "Scalability requirements"
+            ]
+        elif framework == "audience_growth_strategy":
+            analysis["growth_potential"] = 0.85
+            analysis["audience_segments"] = [
+                "Professional composers",
+                "Amateur music creators"
+            ]
+        
+        return analysis
+    
+    async def _generate_strategic_options(self, decision_area: str, decision_intelligence: Dict) -> List[Dict]:
+        """Generate strategic options based on decision intelligence"""
+        # Generate strategic options based on decision area
+        role = self.role_dimensions.role
+        
+        options = []
+        
+        if "expansion" in decision_area.lower():
+            options.extend([
+                {
+                    "option": "Europe-first approach",
+                    "strategic_alignment": 0.82,
+                    "resource_requirements": "Medium-High",
+                    "timing_sensitivity": "Medium - 6-month window before competitor entry",
+                    "risk_profile": {
+                        "regulatory": "Medium - fragmented EU AI regulations",
+                        "market_acceptance": "Low - strong music tech adoption",
+                        "execution": "Medium - requires localization"
+                    },
+                    "opportunity_cost": "Delayed Asian market entry where growth is highest",
+                    "key_dependencies": ["EU team buildout", "GDPR compliance overhaul"]
+                },
+                {
+                    "option": "Japan-first approach",
+                    "strategic_alignment": 0.76,
+                    "resource_requirements": "Medium",
+                    "timing_sensitivity": "High - key competitor launching Q3",
+                    "risk_profile": {
+                        "regulatory": "Low - favorable AI music regulations",
+                        "market_acceptance": "Medium - requires local partners",
+                        "execution": "High - cultural adaptation challenges"
+                    },
+                    "opportunity_cost": "Delayed entry to larger EU market",
+                    "key_dependencies": ["Japanese language support", "Local partnership"]
+                }
+            ])
+        elif "product" in decision_area.lower():
+            options.extend([
+                {
+                    "option": "Creator-focused feature expansion",
+                    "strategic_alignment": 0.88,
+                    "resource_requirements": "Medium",
+                    "timing_sensitivity": "Medium - 3-month window for differentiation",
+                    "risk_profile": {
+                        "technical": "Low - builds on existing capabilities",
+                        "market_acceptance": "Low - aligned with creator demands",
+                        "execution": "Medium - requires UX refinement"
+                    },
+                    "opportunity_cost": "Delayed listener experience improvements",
+                    "key_dependencies": ["Creator research completion", "UI design overhaul"]
+                },
+                {
+                    "option": "Listener experience prioritization",
+                    "strategic_alignment": 0.72,
+                    "resource_requirements": "Medium-Low",
+                    "timing_sensitivity": "Low - differentiation already established",
+                    "risk_profile": {
+                        "technical": "Low - incremental improvements",
+                        "market_acceptance": "Low - addresses known pain points",
+                        "execution": "Low - well-understood requirements"
+                    },
+                    "opportunity_cost": "Slower innovation in creator tools",
+                    "key_dependencies": ["User research validation", "Analytics implementation"]
+                }
+            ])
+        else:
+            # Generic options
+            options.extend([
+                {
+                    "option": f"Option A for {decision_area}",
+                    "strategic_alignment": 0.78,
+                    "resource_requirements": "Medium",
+                    "timing_sensitivity": "Medium",
+                    "risk_profile": {
+                        "primary_risk": "Medium",
+                        "secondary_risk": "Low"
+                    },
+                    "opportunity_cost": "Alternative resource allocation",
+                    "key_dependencies": ["Dependency 1", "Dependency 2"]
+                },
+                {
+                    "option": f"Option B for {decision_area}",
+                    "strategic_alignment": 0.72,
+                    "resource_requirements": "Low",
+                    "timing_sensitivity": "Low",
+                    "risk_profile": {
+                        "primary_risk": "Low",
+                        "secondary_risk": "Medium"
+                    },
+                    "opportunity_cost": "Potential market advantage",
+                    "key_dependencies": ["Dependency A", "Dependency B"]
+                }
+            ])
+        
+        # Add role-specific option insights
+        for option in options:
+            if role == ExecutiveRole.CTO:
+                option["technical_feasibility"] = random.choice(["Challenging", "Moderate", "Straightforward"])
+                option["infrastructure_impact"] = f"Impact assessment for {option['option']}"
+            elif role == ExecutiveRole.CMO:
+                option["brand_alignment"] = round(random.uniform(0.6, 0.9), 2)
+                option["messaging_strategy"] = f"Messaging approach for {option['option']}"
+            elif role == ExecutiveRole.CFO:
+                option["financial_projection"] = {
+                    "investment": f"${random.randint(100, 1000)}K",
+                    "expected_return": f"${random.randint(500, 2000)}K",
+                    "payback_period": f"{random.randint(6, 24)} months"
+                }
+        
+        return options
+    
+    async def _executive_level_factors(self, decision_area: str, context_data: Dict) -> List[str]:
+        """Identify executive-level considerations"""
+        # Get role-specific considerations
+        role = self.role_dimensions.role
+        
+        # Base considerations for any decision
+        considerations = [
+            f"Alignment with company vision for Session42",
+            f"Impact on team morale and culture"
+        ]
+        
+        # Add role-specific considerations
+        if role == ExecutiveRole.CEO:
+            considerations.extend([
+                "Asia expansion aligns with investor expectations communicated in last round",
+                "CTO raised concerns about technical infrastructure for multi-region support",
+                "Current cash runway sufficient for single region expansion without additional funding"
+            ])
+        elif role == ExecutiveRole.CTO:
+            considerations.extend([
+                "Technical architecture readiness for proposed changes",
+                "Impact on engineering team allocation and velocity",
+                "Technology partner relationships and dependencies"
+            ])
+        elif role == ExecutiveRole.CMO:
+            considerations.extend([
+                "Brand consistency across proposed initiatives",
+                "Impact on current marketing campaigns and messaging",
+                "Customer perception and potential confusion"
+            ])
+        elif role == ExecutiveRole.CFO:
+            considerations.extend([
+                "Cash flow implications of proposed investments",
+                "Impact on next funding round timing and valuation",
+                "Financial risk exposure and mitigation options"
+            ])
+        
+        return considerations
+
+class StrategicNetworkAgent:
+    """Agent that maps your network to strategic business objectives"""
+    
+    def __init__(self, role_dimensions: RoleSpecificDimensions):
+        self.role_dimensions = role_dimensions
+    
+    async def map_strategic_network(self, contacts: List[Dict], business_objectives: List[Dict]) -> Dict:
+        """Map your professional network to key business objectives"""
+        
+        # Initialize strategic network map
+        network_map = {
+            "objectives": {},
+            "key_connectors": [],
+            "strategic_gaps": [],
+            "hidden_opportunities": []
+        }
+        
+        # For each business objective, map relevant network connections
+        for objective in business_objectives:
+            objective_id = objective.get("id")
+            network_map["objectives"][objective_id] = {
+                "title": objective.get("title"),
+                "relevant_contacts": [],
+                "contact_gaps": [],
+                "activation_strategy": {}
+            }
+            
+            # Find contacts relevant to this objective
+            for contact in contacts:
+                relevance = await self._evaluate_contact_objective_relevance(
+                    contact, objective
+                )
+                
+                if relevance["score"] > 0.6:
+                    network_map["objectives"][objective_id]["relevant_contacts"].append({
+                        "contact_id": contact.get("id"),
+                        "name": contact.get("name"),
+                        "relevance_score": relevance["score"],
+                        "relevance_factors": relevance["factors"],
+                        "activation_approach": relevance["activation_approach"]
+                    })
+            
+            # Identify network gaps for this objective
+            network_map["objectives"][objective_id]["contact_gaps"] = await self._identify_network_gaps(
+                objective, network_map["objectives"][objective_id]["relevant_contacts"]
+            )
+            
+            # Create network activation strategy for this objective
+            network_map["objectives"][objective_id]["activation_strategy"] = await self._create_activation_strategy(
+                objective, network_map["objectives"][objective_id]
+            )
+        
+        # Identify key network connectors across objectives
+        network_map["key_connectors"] = await self._identify_key_connectors(
+            network_map["objectives"]
+        )
+        
+        # Find strategic network gaps
+        network_map["strategic_gaps"] = await self._identify_strategic_gaps(
+            network_map["objectives"]
+        )
+        
+        # Discover hidden opportunities in network
+        network_map["hidden_opportunities"] = await self._discover_hidden_opportunities(
+            contacts, business_objectives, network_map
+        )
+        
+        return network_map
+    
+    async def _evaluate_contact_objective_relevance(self, contact: Dict, objective: Dict) -> Dict:
+        """Evaluate the relevance of a contact to a business objective"""
+        # In a real implementation, this would use Claude or another LLM
+        # Here we'll simulate with sample data
+        
+        objective_title = objective.get("title", "")
+        contact_name = contact.get("name", "")
+        contact_role = contact.get("role", "")
+        contact_company = contact.get("company", "")
+        
+        # Generate relevance score based on contact and objective
+        import random
+        relevance_score = round(random.uniform(0.5, 0.9), 2)
+        
+        # Generate relevant factors
+        relevance_factors = []
+        if "funding" in objective_title.lower() and ("investor" in contact_role.lower() or "vc" in contact_role.lower()):
+            relevance_factors.append(f"Active investor in music technology space")
+            relevance_score = max(relevance_score, 0.8)
+        elif "expansion" in objective_title.lower() and "international" in contact_role.lower():
+            relevance_factors.append(f"International market expertise")
+            relevance_score = max(relevance_score, 0.75)
+        elif "product" in objective_title.lower() and "product" in contact_role.lower():
+            relevance_factors.append(f"Product development expertise")
+            relevance_score = max(relevance_score, 0.85)
+        else:
+            relevance_factors.append(f"General industry connection")
+        
+        # Add role-specific activation approach
+        role = self.role_dimensions.role
+        
+        if role == ExecutiveRole.CEO:
+            activation_approach = f"Schedule strategic discussion on {objective_title}"
+        elif role == ExecutiveRole.CTO:
+            activation_approach = f"Engage in technical discussion related to {objective_title}"
+        elif role == ExecutiveRole.CMO:
+            activation_approach = f"Explore marketing collaboration opportunities for {objective_title}"
+        elif role == ExecutiveRole.CFO:
+            activation_approach = f"Discuss financial aspects of {objective_title}"
+        else:
+            activation_approach = f"Connect regarding {objective_title}"
+        
+        return {
+            "score": relevance_score,
+            "factors": relevance_factors,
+            "activation_approach": activation_approach
+        }
+    
+    async def _identify_network_gaps(self, objective: Dict, relevant_contacts: List[Dict]) -> List[Dict]:
+        """Identify gaps in the network for a specific objective"""
+        # Generate gaps based on objective and executive role
+        gaps = []
+        
+        objective_title = objective.get("title", "")
+        role = self.role_dimensions.role
+        
+        if "funding" in objective_title.lower():
+            if len(relevant_contacts) < 3 or sum(c.get("relevance_score", 0) for c in relevant_contacts) < 2.0:
+                gaps.append({
+                    "gap_type": "Key investor relationships",
+                    "criticality": "High",
+                    "recommendations": [
+                        "Connect with venture partners specializing in music technology",
+                        "Attend music tech investment conferences"
+                    ]
+                })
+        elif "expansion" in objective_title.lower():
+            gaps.append({
+                "gap_type": "International market experts",
+                "criticality": "Medium",
+                "recommendations": [
+                    "Connect with executives who have led international expansion",
+                    "Develop relationships with local market insiders"
+                ]
+            })
+        
+        # Add role-specific gap insights
+        for gap in gaps:
+            if role == ExecutiveRole.CEO:
+                gap["strategic_impact"] = "High - direct impact on company trajectory"
+            elif role == ExecutiveRole.CTO:
+                gap["technical_dimension"] = "Need technical partners with relevant expertise"
+            elif role == ExecutiveRole.CMO:
+                gap["marketing_dimension"] = "Brand positioning expertise in target markets needed"
+            elif role == ExecutiveRole.CFO:
+                gap["financial_dimension"] = "Financial modeling and market expertise required"
+        
+        return gaps
+    
+    async def _create_activation_strategy(self, objective: Dict, objective_network: Dict) -> Dict:
+        """Create a network activation strategy for a specific objective"""
+        # Generate activation strategy
+        role = self.role_dimensions.role
+        
+        objective_title = objective.get("title", "")
+        
+        strategy = {
+            "phase_1": "Initial outreach and relationship warming (2-3 weeks)",
+            "phase_2": "Targeted engagement around specific opportunities (4-6 weeks)",
+            "phase_3": "Formalize relationships and establish ongoing collaboration (6-8 weeks)"
+        }
+        
+        # Add role-specific strategy elements
+        if role == ExecutiveRole.CEO:
+            strategy["key_messages"] = [
+                "Strategic vision for the company",
+                "Partnership opportunities with mutual value"
+            ]
+        elif role == ExecutiveRole.CTO:
+            strategy["key_messages"] = [
+                "Technical roadmap and innovation opportunities",
+                "Collaborative development possibilities"
+            ]
+        elif role == ExecutiveRole.CMO:
+            strategy["key_messages"] = [
+                "Brand positioning and audience expansion",
+                "Co-marketing and promotional opportunities"
+            ]
+        elif role == ExecutiveRole.CFO:
+            strategy["key_messages"] = [
+                "Financial growth trajectory",
+                "Investment thesis and returns potential"
+            ]
+        
+        return strategy
+    
+    async def _identify_key_connectors(self, objectives: Dict) -> List[Dict]:
+        """Identify key network connectors across objectives"""
+        # Track contact frequency across objectives
+        contact_frequency = {}
+        
+        # Count appearances of contacts across objectives
+        for objective_id, objective_data in objectives.items():
+            for contact in objective_data.get("relevant_contacts", []):
+                contact_id = contact.get("contact_id")
+                contact_name = contact.get("name")
+                if contact_id:
+                    if contact_id not in contact_frequency:
+                        contact_frequency[contact_id] = {
+                            "contact_id": contact_id,
+                            "name": contact_name,
+                            "count": 0,
+                            "objectives": []
+                        }
+                    contact_frequency[contact_id]["count"] += 1
+                    contact_frequency[contact_id]["objectives"].append(objective_id)
+        
+        # Identify connectors (contacts relevant to multiple objectives)
+        connectors = [
+            {
+                "contact_id": data["contact_id"],
+                "name": data["name"],
+                "relevance_breadth": data["count"],
+                "relevant_objectives": data["objectives"],
+                "connector_value": f"Spans {data['count']} strategic priorities"
+            }
+            for contact_id, data in contact_frequency.items()
+            if data["count"] > 1
+        ]
+        
+        # Sort by relevance breadth
+        connectors.sort(key=lambda x: x["relevance_breadth"], reverse=True)
+        
+        return connectors[:5]  # Return top 5 connectors
+    
+    async def _identify_strategic_gaps(self, objectives: Dict) -> List[Dict]:
+        """Identify strategic network gaps across objectives"""
+        # Collect all gaps across objectives
+        all_gaps = []
+        for objective_id, objective_data in objectives.items():
+            for gap in objective_data.get("contact_gaps", []):
+                gap_with_objective = gap.copy()
+                gap_with_objective["objective"] = objective_id
+                all_gaps.append(gap_with_objective)
+        
+        # Identify common gap themes
+        gap_themes = {}
+        for gap in all_gaps:
+            gap_type = gap.get("gap_type", "")
+            if gap_type not in gap_themes:
+                gap_themes[gap_type] = {
+                    "gap_type": gap_type,
+                    "occurrence": 0,
+                    "objectives": [],
+                    "criticality": gap.get("criticality", "Medium"),
+                    "recommendations": gap.get("recommendations", [])
+                }
+            gap_themes[gap_type]["occurrence"] += 1
+            gap_themes[gap_type]["objectives"].append(gap.get("objective"))
+        
+        # Convert to list and sort by occurrence
+        strategic_gaps = list(gap_themes.values())
+        strategic_gaps.sort(key=lambda x: x["occurrence"], reverse=True)
+        
+        # Add executive role perspective
+        role = self.role_dimensions.role
+        
+        for gap in strategic_gaps:
+            if role == ExecutiveRole.CEO:
+                gap["strategic_implication"] = f"Limits our ability to execute across {len(gap['objectives'])} objectives"
+            elif role == ExecutiveRole.CTO:
+                gap["technical_implication"] = f"Creates technical execution risk for key initiatives"
+            elif role == ExecutiveRole.CMO:
+                gap["marketing_implication"] = f"Constrains our market positioning and reach"
+            elif role == ExecutiveRole.CFO:
+                gap["financial_implication"] = f"Increases financial risk and opportunity cost"
+        
+        return strategic_gaps
+    
+    async def _discover_hidden_opportunities(self, contacts: List[Dict], business_objectives: List[Dict], network_map: Dict) -> List[Dict]:
+        """Discover hidden opportunities in the network"""
+        # Generate a few hidden opportunities based on executive role
+        role = self.role_dimensions.role
+        
+        opportunities = []
+        
+        if role == ExecutiveRole.CEO:
+            opportunities.append({
+                "title": "Potential strategic partnership opportunity",
+                "description": "Multiple connections to Spotify executives suggest unexplored strategic partnership potential",
+                "action": "Map complete relationship network to Spotify and identify optimal entry point"
+            })
+        elif role == ExecutiveRole.CTO:
+            opportunities.append({
+                "title": "Technical talent acquisition channel",
+                "description": "Several engineering leaders in network with teams affected by recent layoffs",
+                "action": "Activate relationships to access senior engineering talent"
+            })
+        elif role == ExecutiveRole.CMO:
+            opportunities.append({
+                "title": "Influencer marketing opportunity",
+                "description": "Unexpected connections to music influencers through secondary network",
+                "action": "Map influencer relationships and develop targeted outreach strategy"
+            })
+        elif role == ExecutiveRole.CFO:
+            opportunities.append({
+                "title": "Alternative funding channel",
+                "description": "Connections to music industry venture fund not previously considered",
+                "action": "Explore relationship pathway to fund partners"
+            })
+        
+        return opportunities
+
+class StrategicIntelligenceSystem:
+    """Integrated strategic intelligence system"""
+    
+    def __init__(self, executive_role: Union[ExecutiveRole, str], company_name: str = "Session42"):
+        """
+        Initialize strategic intelligence system
+        
+        Args:
+            executive_role: The executive role to adapt intelligence for
+            company_name: The company name for context
+        """
+        # Convert string to enum if needed
+        if isinstance(executive_role, str):
+            try:
+                executive_role = ExecutiveRole[executive_role.upper()]
+            except KeyError:
+                raise ValueError(f"Invalid executive role: {executive_role}. Must be one of {[role.name for role in ExecutiveRole]}")
+        
+        # Initialize role-specific dimensions
+        self.role_dimensions = RoleSpecificDimensions(executive_role)
+        
+        # Initialize agents with role-specific dimensions
+        self.relationship_agent = StrategicRelationshipAgent(self.role_dimensions)
+        self.landscape_agent = CompetitiveLandscapeAgent(self.role_dimensions)
+        self.decision_agent = DecisionIntelligenceAgent(self.role_dimensions)
+        self.network_agent = StrategicNetworkAgent(self.role_dimensions)
+        
+        # Company information
+        self.company_name = company_name
+    
+    async def generate_intelligence_brief(self, focus_area: str = None) -> Dict:
+        """
+        Generate comprehensive intelligence brief
+        
+        Args:
+            focus_area: Optional area to focus on
+            
+        Returns:
+            Intelligence brief tailored to executive role
+        """
+        # Get company context
+        company_context = await self._get_company_context()
+        
+        # Get business objectives
+        business_objectives = await self._get_business_objectives()
+        
+        # Get contacts
+        contacts = await self._get_enriched_contacts()
+        
+        # 1. Map competitive landscape
+        landscape = await self.landscape_agent.map_strategic_landscape(company_context)
+        
+        # 2. Analyze strategic network
+        network = await self.network_agent.map_strategic_network(contacts, business_objectives)
+        
+        # 3. For key contacts, generate strategic relationship intelligence
+        key_contacts = self._identify_key_contacts(contacts, network)
+        strategic_relationships = {}
+        
+        for contact in key_contacts:
+            strategic_relationships[contact["id"]] = await self.relationship_agent.analyze_strategic_relationship(
+                contact, company_context
+            )
+        
+        # 4. For each business objective, generate decision intelligence
+        decision_intelligence = {}
+        for objective in business_objectives:
+            decision_area = objective.get("title")
+            context_data = {
+                "objective": objective,
+                "landscape": self._filter_landscape_for_objective(landscape, objective),
+                "network": network["objectives"].get(objective.get("id"), {})
+            }
+            
+            decision_intelligence[objective.get("id")] = await self.decision_agent.analyze_decision_context(
+                decision_area, context_data
+            )
+        
+        # 5. Synthesize into executive intelligence brief
+        brief = await self._synthesize_executive_brief(
+            company_context,
+            landscape,
+            network,
+            strategic_relationships,
+            decision_intelligence,
+            focus_area
+        )
+        
+        return brief
+    
+    async def _get_company_context(self) -> Dict:
+        """Get company context information"""
+        # In a real implementation, this would fetch company data from a database or API
+        # Here we use sample data
+        return {
+            "name": self.company_name,
+            "industry": "AI Music Technology",
+            "focus_area": "AI-powered music creation and collaboration platform",
+            "advantage": "Artist-centric approach with human-AI collaboration focus",
+            "vulnerability": "Scale compared to major tech initiatives",
+            "technical_differentiation": "Proprietary voice modeling technology",
+            "engineering_velocity": "8 deployments per week",
+            "brand_perception": "Authentic, artist-friendly technology",
+            "cac": "$45 per creator",
+            "unit_economics": "$32 LTV/$12 CAC ratio",
+            "capital_efficiency": "1.8x revenue per dollar raised vs. peers"
+        }
+    
+    async def _get_business_objectives(self) -> List[Dict]:
+        """Get business objectives"""
+        # In a real implementation, this would fetch objectives from a database or API
+        # Here we use sample data based on executive role
+        
+        # Base objectives for any role
+        objectives = [
+            {
+                "id": "obj1",
+                "title": "Series B Funding Round",
+                "description": "Secure $15M Series B funding to accelerate growth",
+                "timeline": "Q3-Q4 2025",
+                "priority": "High"
+            },
+            {
+                "id": "obj2",
+                "title": "International Market Expansion",
+                "description": "Expand to key international markets to drive growth",
+                "timeline": "Q1-Q2 2026",
+                "priority": "Medium"
+            },
+            {
+                "id": "obj3",
+                "title": "Product Feature Expansion",
+                "description": "Develop and launch key product features for competitive advantage",
+                "timeline": "Q3 2025 - Q1 2026",
+                "priority": "High"
+            }
+        ]
+        
+        # Add role-specific objectives
+        role = self.role_dimensions.role
+        
+        if role == ExecutiveRole.CEO:
+            objectives.append({
+                "id": "obj_ceo_1",
+                "title": "Strategic Partnerships",
+                "description": "Establish strategic partnerships with key industry players",
+                "timeline": "Q3 2025 - Q2 2026",
+                "priority": "Medium"
+            })
+        elif role == ExecutiveRole.CTO:
+            objectives.append({
+                "id": "obj_cto_1",
+                "title": "Technical Infrastructure Scaling",
+                "description": "Scale technical infrastructure to support 10x user growth",
+                "timeline": "Q3 2025 - Q1 2026",
+                "priority": "High"
+            })
+        elif role == ExecutiveRole.CMO:
+            objectives.append({
+                "id": "obj_cmo_1",
+                "title": "Brand Awareness Campaign",
+                "description": "Increase brand awareness among target creator audience",
+                "timeline": "Q3-Q4 2025",
+                "priority": "High"
+            })
+        elif role == ExecutiveRole.CFO:
+            objectives.append({
+                "id": "obj_cfo_1",
+                "title": "Financial Efficiency Optimization",
+                "description": "Optimize financial operations for improved unit economics",
+                "timeline": "Q3 2025 - Q1 2026",
+                "priority": "Medium"
+            })
+        
+        return objectives
+    
+    async def _get_enriched_contacts(self) -> List[Dict]:
+        """Get enriched contacts"""
+        # In a real implementation, this would fetch contacts from a database or CRM
+        # Here we use sample data
+        
+        # Base contacts for any role
+        contacts = [
+            {
+                "id": "contact1",
+                "name": "John Smith",
+                "role": "VP Engineering",
+                "company": "Spotify",
+                "email": "john.smith@spotify.com",
+                "phone": "+1-555-123-4567",
+                "last_contact": "2025-05-15",
+                "relationship_strength": 0.75
+            },
+            {
+                "id": "contact2",
+                "name": "Amanda Chen",
+                "role": "Partner",
+                "company": "Amplify Ventures",
+                "email": "amanda@amplify.vc",
+                "phone": "+1-555-987-6543",
+                "last_contact": "2025-06-01",
+                "relationship_strength": 0.85
+            },
+            {
+                "id": "contact3",
+                "name": "Michael Wong",
+                "role": "Head of Business Development",
+                "company": "Sony Music",
+                "email": "michael.wong@sonymusic.com",
+                "phone": "+1-555-456-7890",
+                "last_contact": "2025-04-20",
+                "relationship_strength": 0.65
+            }
+        ]
+        
+        # Add role-specific contacts
+        role = self.role_dimensions.role
+        
+        if role == ExecutiveRole.CEO:
+            contacts.append({
+                "id": "contact_ceo_1",
+                "name": "Sarah Johnson",
+                "role": "CEO",
+                "company": "MusicTech Partners",
+                "email": "sarah@musictech.partners",
+                "phone": "+1-555-222-3333",
+                "last_contact": "2025-05-10",
+                "relationship_strength": 0.80
+            })
+        elif role == ExecutiveRole.CTO:
+            contacts.append({
+                "id": "contact_cto_1",
+                "name": "David Chen",
+                "role": "CTO",
+                "company": "AudioTech Labs",
+                "email": "david@audiotech.labs",
+                "phone": "+1-555-444-5555",
+                "last_contact": "2025-05-25",
+                "relationship_strength": 0.70
+            })
+        elif role == ExecutiveRole.CMO:
+            contacts.append({
+                "id": "contact_cmo_1",
+                "name": "Jennifer Lee",
+                "role": "CMO",
+                "company": "CreatorPlatform",
+                "email": "jennifer@creatorplatform.io",
+                "phone": "+1-555-666-7777",
+                "last_contact": "2025-06-05",
+                "relationship_strength": 0.75
+            })
+        elif role == ExecutiveRole.CFO:
+            contacts.append({
+                "id": "contact_cfo_1",
+                "name": "Robert Patel",
+                "role": "Investment Director",
+                "company": "Music Ventures Fund",
+                "email": "robert@musicventures.fund",
+                "phone": "+1-555-888-9999",
+                "last_contact": "2025-05-20",
+                "relationship_strength": 0.85
+            })
+        
+        return contacts
+    
+    def _identify_key_contacts(self, contacts: List[Dict], network: Dict) -> List[Dict]:
+        """Identify key contacts based on network analysis"""
+        # Use network analysis to identify key contacts
+        key_contact_ids = set()
+        
+        # Add contacts that are connectors across objectives
+        for connector in network.get("key_connectors", []):
+            key_contact_ids.add(connector.get("contact_id"))
+        
+        # Add high-relevance contacts for high-priority objectives
+        for objective_id, objective_data in network.get("objectives", {}).items():
+            for contact in objective_data.get("relevant_contacts", []):
+                if contact.get("relevance_score", 0) > 0.8:
+                    key_contact_ids.add(contact.get("contact_id"))
+        
+        # Filter the full contacts list to key contacts
+        key_contacts = [contact for contact in contacts if contact.get("id") in key_contact_ids]
+        
+        # If too few, add some based on relationship strength
+        if len(key_contacts) < 3:
+            additional_contacts = sorted(
+                [c for c in contacts if c.get("id") not in key_contact_ids],
+                key=lambda x: x.get("relationship_strength", 0),
+                reverse=True
+            )
+            key_contacts.extend(additional_contacts[:3 - len(key_contacts)])
+        
+        return key_contacts
+    
+    def _filter_landscape_for_objective(self, landscape: Dict, objective: Dict) -> Dict:
+        """Filter landscape information relevant to a specific objective"""
+        objective_title = objective.get("title", "").lower()
+        
+        # Determine relevant areas based on objective
+        relevant_areas = []
+        if "funding" in objective_title:
+            relevant_areas.extend(["ai_music_creation_market", "music_consumption_trends"])
+        elif "expansion" in objective_title:
+            relevant_areas.extend(["music_distribution_platforms", "music_consumption_trends"])
+        elif "product" in objective_title:
+            relevant_areas.extend(["ai_music_creation_market", "artist_collaboration_tools"])
+        elif "partnership" in objective_title:
+            relevant_areas.extend(["music_distribution_platforms", "artist_collaboration_tools"])
+        elif "infrastructure" in objective_title:
+            relevant_areas.extend(["audio_technology_innovation", "ai_music_creation_market"])
+        elif "brand" in objective_title:
+            relevant_areas.extend(["music_consumption_trends", "artist_collaboration_tools"])
+        elif "financial" in objective_title:
+            relevant_areas.extend(["ai_music_creation_market", "music_rights_management"])
+        
+        # Filter landscape to relevant areas
+        filtered_landscape = {area: data for area, data in landscape.items() if area in relevant_areas}
+        
+        return filtered_landscape
+    
+    async def _synthesize_executive_brief(self, company_context: Dict, landscape: Dict, 
+                                         network: Dict, strategic_relationships: Dict,
+                                         decision_intelligence: Dict, focus_area: str = None) -> Dict:
+        """Synthesize an executive intelligence brief"""
+        # Create an executive brief with role-specific emphasis
+        role = self.role_dimensions.role
+        
+        # Base brief structure
+        brief = {
+            "executive_summary": {
+                "title": f"Strategic Intelligence Brief for {role.value}",
+                "company": company_context.get("name"),
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "key_takeaways": []
+            },
+            "competitive_landscape": {},
+            "strategic_relationships": {},
+            "decision_intelligence": {},
+            "network_activation": {},
+            "action_items": []
+        }
+        
+        # Filter based on focus area if provided
+        if focus_area:
+            if "landscape" in focus_area.lower():
+                brief["competitive_landscape"] = landscape
+            elif "relationship" in focus_area.lower():
+                brief["strategic_relationships"] = strategic_relationships
+            elif "decision" in focus_area.lower():
+                brief["decision_intelligence"] = decision_intelligence
+            elif "network" in focus_area.lower():
+                brief["network_activation"] = network
+            else:
+                # Include all sections with less detail
+                brief["competitive_landscape"] = self._summarize_landscape(landscape)
+                brief["strategic_relationships"] = self._summarize_relationships(strategic_relationships)
+                brief["decision_intelligence"] = self._summarize_decisions(decision_intelligence)
+                brief["network_activation"] = self._summarize_network(network)
+        else:
+            # Include all sections with emphasis on role-relevant aspects
+            brief["competitive_landscape"] = self._summarize_landscape(landscape)
+            brief["strategic_relationships"] = self._summarize_relationships(strategic_relationships)
+            brief["decision_intelligence"] = self._summarize_decisions(decision_intelligence)
+            brief["network_activation"] = self._summarize_network(network)
+        
+        # Add role-specific key takeaways
+        if role == ExecutiveRole.CEO:
+            brief["executive_summary"]["key_takeaways"] = [
+                "Strategic partnership opportunities with Spotify could accelerate platform adoption",
+                "Competition in AI music creation is intensifying, with 6-9 month window for differentiation",
+                "Network gaps in international markets could constrain expansion plans"
+            ]
+        elif role == ExecutiveRole.CTO:
+            brief["executive_summary"]["key_takeaways"] = [
+                "Technical differentiation in voice modeling provides 9-12 month competitive advantage",
+                "Infrastructure scaling is critical to support projected user growth in Q4 2025",
+                "Strategic talent acquisition opportunity through network connections to AudioTech Labs"
+            ]
+        elif role == ExecutiveRole.CMO:
+            brief["executive_summary"]["key_takeaways"] = [
+                "Brand positioning as artist-friendly technology resonating strongly with creator audience",
+                "Marketing partnership opportunities with Sony Music could expand creator acquisition",
+                "Content strategy alignment with artist needs showing strong engagement metrics"
+            ]
+        elif role == ExecutiveRole.CFO:
+            brief["executive_summary"]["key_takeaways"] = [
+                "Unit economics trending positively with LTV/CAC ratio improvement to 2.7x",
+                "Strategic funding options expanded through new connections to Music Ventures Fund",
+                "International expansion financial models indicate Japan entry as most capital efficient"
+            ]
+        
+        # Generate role-specific action items
+        if role == ExecutiveRole.CEO:
+            brief["action_items"] = [
+                "Schedule strategic partnership discussion with Spotify VP Engineering",
+                "Review international expansion decision matrix with executive team",
+                "Develop network expansion strategy for key investor relationships"
+            ]
+        elif role == ExecutiveRole.CTO:
+            brief["action_items"] = [
+                "Evaluate technical infrastructure scaling options for projected growth",
+                "Engage AudioTech Labs CTO regarding potential technical collaboration",
+                "Review voice modeling technology patent strategy with legal team"
+            ]
+        elif role == ExecutiveRole.CMO:
+            brief["action_items"] = [
+                "Develop creator acquisition campaign leveraging artist-friendly positioning",
+                "Initiate discussion with Sony Music regarding marketing partnership",
+                "Optimize content strategy based on engagement metrics analysis"
+            ]
+        elif role == ExecutiveRole.CFO:
+            brief["action_items"] = [
+                "Refine financial models for Japan market entry option",
+                "Engage Music Ventures Fund regarding potential Series B participation",
+                "Optimize unit economics through subscription model refinement"
+            ]
+        
+        return brief
+    
+    def _summarize_landscape(self, landscape: Dict) -> Dict:
+        """Create a summary of the competitive landscape"""
+        # In a real implementation, this would generate a concise summary
+        # Here we return the full landscape data
+        return landscape
+    
+    def _summarize_relationships(self, relationships: Dict) -> Dict:
+        """Create a summary of strategic relationships"""
+        # In a real implementation, this would generate a concise summary
+        # Here we return the full relationships data
+        return relationships
+    
+    def _summarize_decisions(self, decisions: Dict) -> Dict:
+        """Create a summary of decision intelligence"""
+        # In a real implementation, this would generate a concise summary
+        # Here we return the full decisions data
+        return decisions
+    
+    def _summarize_network(self, network: Dict) -> Dict:
+        """Create a summary of network activation"""
+        # In a real implementation, this would generate a concise summary
+        # Here we return the full network data
+        return network
+
+# Example usage function
+async def generate_intelligence_for_role(role_name: str, focus_area: str = None) -> Dict:
+    """
+    Generate intelligence for a specific executive role
+    
+    Args:
+        role_name: Name of the executive role (CEO, CTO, etc.)
+        focus_area: Optional area to focus on
+    
+    Returns:
+        Intelligence brief tailored to the role
+    """
+    try:
+        # Create system for specified role
+        system = StrategicIntelligenceSystem(role_name)
+        
+        # Generate brief
+        brief = await system.generate_intelligence_brief(focus_area)
+        
+        return brief
+    except Exception as e:
+        return {"error": str(e)}
+
+# Command-line interface for testing
+async def cli_main():
+    """Command-line interface for testing the system"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Strategic Intelligence System")
+    parser.add_argument("--role", type=str, default="CEO", help="Executive role (CEO, CTO, CMO, etc.)")
+    parser.add_argument("--focus", type=str, default=None, help="Focus area (landscape, relationships, etc.)")
+    args = parser.parse_args()
+    
+    print(f"Generating intelligence brief for {args.role}...")
+    brief = await generate_intelligence_for_role(args.role, args.focus)
+    
+    # Print a summary of the brief
+    print("\n=== Executive Summary ===")
+    print(f"Title: {brief['executive_summary']['title']}")
+    print(f"Date: {brief['executive_summary']['date']}")
+    print("\nKey Takeaways:")
+    for takeaway in brief['executive_summary']['key_takeaways']:
+        print(f"- {takeaway}")
+    
+    print("\n=== Action Items ===")
+    for item in brief['action_items']:
+        print(f"- {item}")
+    
+    print("\nFull brief generated successfully.")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(cli_main())

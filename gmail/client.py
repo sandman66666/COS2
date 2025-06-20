@@ -88,7 +88,7 @@ class GmailClient:
             return True
             
         except Exception as e:
-            logger.error("Gmail API connection error", error=str(e))
+            logger.error("Gmail API connection error", error=str(e), user_id=self.user_id)
             return False
     
     async def get_sent_emails(
@@ -305,3 +305,115 @@ class GmailClient:
         except Exception as e:
             logger.error(f"Error parsing email addresses: {str(e)}")
             return []
+
+    async def get_messages(
+        self,
+        query: str = "",
+        max_results: int = 100,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[Dict]:
+        """
+        Get messages from user's Gmail account with query
+        
+        Args:
+            query: Gmail search query (e.g., 'after:2023/01/01')
+            max_results: Maximum number of emails to retrieve
+            start_date: Optional start date filter
+            end_date: Optional end date filter
+            
+        Returns:
+            List of email messages
+        """
+        if not self.service:
+            if not await self.connect():
+                return []
+        
+        try:
+            # Build search query
+            search_query = query
+            
+            # Add date filters if specified and not already in query
+            if start_date and 'after:' not in search_query:
+                search_query += f" after:{start_date.strftime('%Y/%m/%d')}"
+            if end_date and 'before:' not in search_query:
+                search_query += f" before:{end_date.strftime('%Y/%m/%d')}"
+            
+            # Get list of messages (IDs only)
+            results = []
+            next_page_token = None
+            total_retrieved = 0
+            
+            while total_retrieved < max_results:
+                # Determine how many to request in this batch
+                batch_size = min(MAX_EMAILS_PER_REQUEST, max_results - total_retrieved)
+                
+                # Make API call to get message IDs
+                messages_response = self.service.users().messages().list(
+                    userId='me',
+                    q=search_query,
+                    maxResults=batch_size,
+                    pageToken=next_page_token
+                ).execute()
+                
+                messages = messages_response.get('messages', [])
+                
+                if not messages:
+                    break
+                
+                # Get full message details
+                for msg in messages:
+                    message_id = msg['id']
+                    
+                    # Get full message
+                    msg_data = self.service.users().messages().get(
+                        userId='me',
+                        id=message_id,
+                        format='full'
+                    ).execute()
+                    
+                    # Parse email content
+                    parsed_email = self._parse_message(msg_data)
+                    if parsed_email:
+                        results.append(parsed_email)
+                    
+                # Update counters
+                total_retrieved += len(messages)
+                
+                # Check if there are more pages
+                next_page_token = messages_response.get('nextPageToken')
+                if not next_page_token:
+                    break
+                
+                # Throttle requests to avoid quota issues
+                time.sleep(0.1)
+            
+            logger.info(
+                "Retrieved messages", 
+                user_id=self.user_id,
+                count=len(results),
+                query=search_query
+            )
+            
+            return results
+            
+        except googleapiclient.errors.HttpError as e:
+            logger.error("Gmail API error", error=str(e), user_id=self.user_id)
+            return []
+            
+        except Exception as e:
+            logger.error("Error retrieving messages", error=str(e))
+            return []
+
+    def parse_message(self, msg_data: Dict) -> Optional[Dict]:
+        """
+        Public method to parse Gmail message into structured format
+        (Alias for _parse_message for external use)
+        
+        Args:
+            msg_data: Raw message data from Gmail API
+            
+        Returns:
+            Parsed message dictionary or None if parsing fails
+        """
+        return self._parse_message(msg_data)

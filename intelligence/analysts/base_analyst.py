@@ -15,7 +15,7 @@ from datetime import datetime
 import anthropic
 from utils.logging import structured_logger as logger
 from storage.storage_manager import get_storage_manager
-from config import get_settings
+from config.settings import ANTHROPIC_API_KEY
 
 class BaseAnalyst(ABC):
     """
@@ -34,8 +34,7 @@ class BaseAnalyst(ABC):
             anthropic_api_key: Optional API key for Claude Opus
         """
         self.user_id = user_id
-        self.settings = get_settings()
-        self.api_key = anthropic_api_key or self.settings.ANTHROPIC_API_KEY
+        self.api_key = anthropic_api_key or ANTHROPIC_API_KEY
         self.model = "claude-3-opus-20240229"
         self.client = None
         self.storage_manager = None

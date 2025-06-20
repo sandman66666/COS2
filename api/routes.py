@@ -402,20 +402,19 @@ async def update_user_settings():
 @async_route_no_auth
 async def sync_emails():
     """
-    Synchronize emails from Gmail for the authenticated user.
-    This runs as a background task.
+    Sync emails from Gmail API
     """
-    # Get basic request data first
-    try:
-        days = request.json.get('days', 30) if request.json else 30
-    except:
-        days = 30
+    import json
+    from datetime import datetime, timedelta
+    from flask import session, request, jsonify
     
-    # BULLETPROOF TEST MODE: Check session without any imports or async operations
+    # Get parameters
+    days = int(request.json.get('days', 7))
+    
+    # Get user session and OAuth credentials
     try:
-        from flask import session
-        oauth_creds = session.get('oauth_credentials', {})
         user_email = session.get('user_id', 'test@session-42.com')
+        oauth_creds = session.get('oauth_credentials', {})
         
         # DEBUG: Log what's actually in the session
         logger.info(f"🔍 DEBUG SESSION: user_email={user_email}, has_oauth_creds={bool(oauth_creds)}, oauth_keys={list(oauth_creds.keys()) if oauth_creds else []}")
@@ -424,151 +423,256 @@ async def sync_emails():
         oauth_creds = {}
         user_email = 'test@session-42.com'
     
-    # FORCE TEST MODE for dashboard testing users OR if no real access token
-    has_real_access_token = oauth_creds.get('access_token') and len(str(oauth_creds.get('access_token', ''))) > 50
+    # IMPROVED REAL CREDENTIAL DETECTION
+    # Check for real OAuth access token (must be long enough to be real)
+    has_real_access_token = (
+        oauth_creds.get('access_token') and 
+        len(str(oauth_creds.get('access_token', ''))) > 50 and
+        not str(oauth_creds.get('access_token', '')).startswith('test_') and
+        oauth_creds.get('access_token') != 'fake_access_token'
+    )
+    
+    # Check for real client credentials in environment
+    from config.settings import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+    has_real_client_creds = (
+        GOOGLE_CLIENT_ID and 
+        GOOGLE_CLIENT_SECRET and
+        GOOGLE_CLIENT_ID != 'your_google_client_id_here' and
+        GOOGLE_CLIENT_SECRET != 'your_google_client_secret_here' and
+        len(GOOGLE_CLIENT_ID) > 20 and
+        len(GOOGLE_CLIENT_SECRET) > 20
+    )
+    
+    # Return errors instead of mock data when credentials are missing
+    if not has_real_client_creds:
+        return jsonify({
+            'success': False,
+            'error': 'Google OAuth client credentials not configured',
+            'details': 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in .env file',
+            'debug_info': {
+                'client_id_length': len(GOOGLE_CLIENT_ID) if GOOGLE_CLIENT_ID else 0,
+                'client_secret_length': len(GOOGLE_CLIENT_SECRET) if GOOGLE_CLIENT_SECRET else 0,
+                'has_client_id': bool(GOOGLE_CLIENT_ID),
+                'has_client_secret': bool(GOOGLE_CLIENT_SECRET)
+            }
+        }), 401
     
     if not has_real_access_token:
-        mode_reason = "no_real_access_token"
-        logger.info(f"🧪 TEST MODE: Returning mock data for {user_email} (reason: {mode_reason})")
         return jsonify({
-            'success': True,
-            'message': 'Email synchronization completed (TEST MODE)',
-            'status': 'completed',
-            'test_mode': True,
-            'note': 'This is test data. Authenticate with Google to sync real emails.',
+            'success': False,
+            'error': 'Gmail authentication required',
+            'details': 'No valid OAuth access token found in session. Please authenticate with Google first.',
+            'action_required': 'Visit /login to authenticate with Google and grant Gmail permissions',
             'debug_info': {
                 'user_email': user_email,
-                'mode_reason': mode_reason,
                 'has_oauth_creds': bool(oauth_creds),
-                'has_real_access_token': has_real_access_token
-            },
-            'stats': {
-                'days_synced': days,
-                'total_found': 25,
-                'processed': 23,
-                'errors': 2,
-                'cutoff_date': (datetime.utcnow() - timedelta(days=days)).isoformat()
+                'access_token_length': len(str(oauth_creds.get('access_token', ''))),
+                'oauth_keys': list(oauth_creds.keys()) if oauth_creds else []
             }
-        })
+        }), 401
     
     # REAL MODE: Only import and use storage/database components here
     logger.info(f"🔄 REAL MODE: Starting email sync for {user_email}, last {days} days")
     
-    try:
-        # Import storage components only in real mode
-        from storage.storage_manager import get_storage_manager
-        from google.oauth2.credentials import Credentials
-        from gmail.client import GmailClient
-        
-        # Initialize storage manager for real sync
-        storage_manager = await get_storage_manager()
-        
-        # Get the actual user ID from the email
-        async with storage_manager.postgres.conn_pool.acquire() as conn:
-            user_row = await conn.fetchrow("""
-                SELECT id FROM users WHERE email = $1
-            """, user_email)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Import storage components only in real mode
+            from storage.storage_manager import get_storage_manager
+            from google.oauth2.credentials import Credentials
+            from gmail.client import GmailClient
             
-            if not user_row:
-                # Create user if doesn't exist
-                user_row = await conn.fetchrow("""
-                    INSERT INTO users (email, google_id)
-                    VALUES ($1, $1)
-                    ON CONFLICT (email) DO UPDATE
-                    SET email = $1
-                    RETURNING id
-                """, user_email)
+            # Initialize storage manager for real sync
+            storage_manager = await get_storage_manager()
             
-            user_id = int(user_row['id'])
-        
-        # Create credentials object for Gmail
-        creds = Credentials(
-            token=oauth_creds['access_token'],
-            refresh_token=oauth_creds.get('refresh_token'),
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=GOOGLE_CLIENT_ID,
-            client_secret=GOOGLE_CLIENT_SECRET,
-            scopes=oauth_creds.get('scopes', GOOGLE_SCOPES)
-        )
-        
-        # Initialize Gmail client
-        gmail_client = GmailClient(creds)
-        
-        # Get emails from the last N days
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
-        
-        logger.info(f"Fetching emails since {cutoff_date.isoformat()}")
-        
-        # Fetch emails (this might take a while for large inboxes)
-        messages = gmail_client.get_messages(
-            query=f'after:{cutoff_date.strftime("%Y/%m/%d")}',
-            max_results=1000  # Reasonable limit
-        )
-        
-        logger.info(f"Found {len(messages)} emails to process")
-        
-        # Process and store emails
-        processed_count = 0
-        error_count = 0
-        
-        for message in messages:
-            try:
-                # Parse email
-                email_data = gmail_client.parse_message(message)
+            # Ensure PostgreSQL connection is healthy before proceeding
+            if not await storage_manager.postgres.health_check():
+                logger.warning(f"PostgreSQL connection unhealthy, attempting reconnect (attempt {attempt + 1})")
+                await storage_manager.postgres.reset_connection_pool()
+                await asyncio.sleep(2)
                 
-                # Store email in database (simplified version)
-                async with storage_manager.postgres.conn_pool.acquire() as conn:
-                    await conn.execute("""
-                        INSERT INTO emails (user_id, email_id, subject, sender, recipients, body_text, email_date, metadata)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        ON CONFLICT (user_id, email_id) DO UPDATE
-                        SET subject = EXCLUDED.subject,
-                            sender = EXCLUDED.sender,
-                            recipients = EXCLUDED.recipients,
-                            body_text = EXCLUDED.body_text,
-                            email_date = EXCLUDED.email_date,
-                            metadata = EXCLUDED.metadata,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, 
-                    user_id,
-                    email_data.get('id'),
-                    email_data.get('subject', ''),
-                    email_data.get('sender', ''),
-                    json.dumps(email_data.get('recipients', [])),
-                    email_data.get('body_text', ''),
-                    email_data.get('date'),
-                    json.dumps(email_data.get('metadata', {}))
-                    )
+                # Verify connection is working
+                if not await storage_manager.postgres.health_check():
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise Exception("Failed to establish stable database connection")
+            
+            # Get the actual user ID from the email with retry logic
+            user_id = None
+            for db_attempt in range(3):
+                try:
+                    async with storage_manager.postgres.conn_pool.acquire() as conn:
+                        user_row = await conn.fetchrow("""
+                            SELECT id FROM users WHERE email = $1
+                        """, user_email)
+                        
+                        if not user_row:
+                            # Create user if doesn't exist
+                            user_row = await conn.fetchrow("""
+                                INSERT INTO users (email, google_id)
+                                VALUES ($1, $1)
+                                ON CONFLICT (email) DO UPDATE
+                                SET email = $1
+                                RETURNING id
+                            """, user_email)
+                        
+                        user_id = int(user_row['id'])
+                        break
+                        
+                except Exception as db_error:
+                    if "another operation is in progress" in str(db_error).lower() and db_attempt < 2:
+                        logger.warning(f"Database conflict, retrying user lookup (attempt {db_attempt + 1})")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise db_error
+            
+            if user_id is None:
+                raise Exception("Failed to get or create user ID")
+            
+            # Create credentials object for Gmail
+            creds = Credentials(
+                token=oauth_creds['access_token'],
+                refresh_token=oauth_creds.get('refresh_token'),
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=GOOGLE_CLIENT_ID,
+                client_secret=GOOGLE_CLIENT_SECRET,
+                scopes=oauth_creds.get('scopes', GOOGLE_SCOPES)
+            )
+            
+            # Initialize Gmail client with correct parameters
+            gmail_client = GmailClient(user_id=user_id, credentials=creds)
+            
+            # Connect the Gmail client
+            if not await gmail_client.connect():
+                raise Exception("Failed to connect to Gmail API")
+            
+            # Get emails from the last N days
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            
+            logger.info(f"Fetching emails since {cutoff_date.isoformat()}")
+            
+            # Fetch emails (this might take a while for large inboxes)
+            messages = await gmail_client.get_messages(
+                query=f'after:{cutoff_date.strftime("%Y/%m/%d")}',
+                max_results=1000  # Reasonable limit
+            )
+            
+            logger.info(f"Found {len(messages)} emails to process")
+            
+            # Process and store emails in batches to avoid connection conflicts
+            processed_count = 0
+            error_count = 0
+            batch_size = 10  # Process in smaller batches
+            
+            for i in range(0, len(messages), batch_size):
+                batch = messages[i:i + batch_size]
                 
-                processed_count += 1
+                for message in batch:
+                    try:
+                        # The message is already parsed by gmail_client.get_messages()
+                        email_data = message
+                        
+                        # Store email in database with retry logic using correct column names
+                        for store_attempt in range(3):
+                            try:
+                                async with storage_manager.postgres.conn_pool.acquire() as conn:
+                                    await conn.execute("""
+                                        INSERT INTO emails (user_id, gmail_id, content, metadata)
+                                        VALUES ($1, $2, $3, $4)
+                                        ON CONFLICT (gmail_id) DO UPDATE
+                                        SET content = EXCLUDED.content,
+                                            metadata = EXCLUDED.metadata,
+                                            updated_at = CURRENT_TIMESTAMP
+                                    """, 
+                                    user_id,
+                                    email_data.get('message_id'),
+                                    email_data.get('body_text', ''),
+                                    json.dumps({
+                                        'subject': email_data.get('subject', ''),
+                                        'from': email_data.get('from', ''),
+                                        'to': email_data.get('to', []),
+                                        'cc': email_data.get('cc', []),
+                                        'date': email_data.get('date'),
+                                        'thread_id': email_data.get('thread_id'),
+                                        'headers': email_data.get('headers', {}),
+                                        'is_sent': email_data.get('is_sent', False)
+                                    })
+                                    )
+                                break  # Success, exit retry loop
+                                
+                            except Exception as store_error:
+                                if "another operation is in progress" in str(store_error).lower() and store_attempt < 2:
+                                    logger.warning(f"Database store conflict, retrying (attempt {store_attempt + 1})")
+                                    await asyncio.sleep(0.5)
+                                    continue
+                                else:
+                                    raise store_error
+                        
+                        processed_count += 1
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to process email {message.get('message_id', 'unknown')}: {str(e)}")
+                        error_count += 1
+                        continue
                 
-            except Exception as e:
-                logger.warning(f"Failed to process email {message.get('id', 'unknown')}: {str(e)}")
-                error_count += 1
+                # Small delay between batches to prevent overwhelming the connection pool
+                if i + batch_size < len(messages):
+                    await asyncio.sleep(0.1)
+            
+            logger.info(f"Email sync completed: {processed_count} processed, {error_count} errors")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Email synchronization completed',
+                'status': 'completed',
+                'stats': {
+                    'days_synced': days,
+                    'total_found': len(messages),
+                    'processed': processed_count,
+                    'errors': error_count,
+                    'cutoff_date': cutoff_date.isoformat()
+                }
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Email sync failed (attempt {attempt + 1}): {error_msg}", user_email=user_email)
+            
+            # Check if this is a retryable error
+            if any(phrase in error_msg.lower() for phrase in [
+                "another operation is in progress",
+                "connection was closed",
+                "event loop is closed",
+                "pool is closed"
+            ]) and attempt < max_retries - 1:
+                logger.warning(f"Retryable error, attempting again (attempt {attempt + 1})")
+                
+                # Reset storage manager connections
+                try:
+                    storage_manager = await get_storage_manager()
+                    await storage_manager.postgres.reset_connection_pool()
+                except:
+                    pass
+                
+                await asyncio.sleep(2)
                 continue
-        
-        logger.info(f"Email sync completed: {processed_count} processed, {error_count} errors")
-        
-        return jsonify({
-            'success': True,
-            'message': f'Email synchronization completed',
-            'status': 'completed',
-            'stats': {
-                'days_synced': days,
-                'total_found': len(messages),
-                'processed': processed_count,
-                'errors': error_count,
-                'cutoff_date': cutoff_date.isoformat()
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Email sync failed: {str(e)}", user_email=user_email)
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'status': 'failed'
-        }), 500
+            else:
+                # Non-retryable error or max retries reached
+                return jsonify({
+                    'success': False,
+                    'error': error_msg,
+                    'status': 'failed',
+                    'attempt': attempt + 1
+                }), 500
+    
+    # If we get here, all retries failed
+    return jsonify({
+        'success': False,
+        'error': 'Email sync failed after multiple retries due to database connection issues',
+        'status': 'failed'
+    }), 500
 
 @api_bp.route('/gmail/analyze-sent', methods=['POST'])
 @async_route
@@ -862,30 +966,151 @@ async def get_contact_stats():
 # === Email Search Routes ===
 
 @api_bp.route('/emails/search')
-@async_route
+@async_route_no_auth
 async def search_emails():
-    """Search emails semantically"""
-    from flask import session
-    user_id = session.get('user_id')
+    """
+    Search emails by topic, contact, or other criteria
+    """
+    from flask import request
     
     # Get search parameters
-    query = request.args.get('q')
-    limit = int(request.args.get('limit', 10))
+    topic = request.args.get('topic')
+    contact = request.args.get('contact')
+    limit = int(request.args.get('limit', 50))
     
-    if not query:
-        return jsonify({'error': 'Search query required'}), 400
+    try:
+        # Get storage manager
+        storage_manager = await get_storage_manager()
         
-    # Get storage manager
-    storage_manager = await get_storage_manager()
+        # Build search query
+        if topic:
+            # Search emails containing the topic
+            async with storage_manager.postgres.conn_pool.acquire() as conn:
+                emails = await conn.fetch("""
+                    SELECT e.*, u.email as user_email
+                    FROM emails e
+                    JOIN users u ON e.user_id = u.id
+                    WHERE e.content ILIKE $1
+                    ORDER BY e.created_at DESC
+                    LIMIT $2
+                """, f'%{topic}%', limit)
+                
+        elif contact:
+            # Search emails from or to the contact
+            async with storage_manager.postgres.conn_pool.acquire() as conn:
+                emails = await conn.fetch("""
+                    SELECT e.*, u.email as user_email
+                    FROM emails e
+                    JOIN users u ON e.user_id = u.id
+                    WHERE e.metadata::text ILIKE $1
+                    OR e.content ILIKE $1
+                    ORDER BY e.created_at DESC
+                    LIMIT $2
+                """, f'%{contact}%', limit)
+        else:
+            return jsonify({'error': 'No search criteria provided'}), 400
+        
+        # Format email results
+        email_list = []
+        for email in emails:
+            try:
+                metadata = json.loads(email['metadata']) if email['metadata'] else {}
+            except:
+                metadata = {}
+                
+            email_data = {
+                'id': email['id'],
+                'subject': metadata.get('subject', 'No Subject'),
+                'from': metadata.get('from', 'Unknown'),
+                'to': metadata.get('to', 'Unknown'),
+                'date': email['created_at'].isoformat() if email['created_at'] else None,
+                'content': email['content'][:1000] if email['content'] else 'No content',  # Limit content length
+                'user_email': email['user_email']
+            }
+            email_list.append(email_data)
+        
+        return jsonify({
+            'success': True,
+            'emails': email_list,
+            'total': len(email_list),
+            'search_criteria': {
+                'topic': topic,
+                'contact': contact,
+                'limit': limit
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Email search failed: {str(e)}")
+        return jsonify({
+            'error': f'Search failed: {str(e)}',
+            'emails': []
+        }), 500
+
+@api_bp.route('/emails')
+@async_route_no_auth
+async def get_all_emails():
+    """
+    Get all emails for the current user
+    """
+    from flask import session
     
-    # Perform semantic search
-    results = await storage_manager.search_emails_semantic(
-        user_id,
-        query,
-        limit
-    )
-    
-    return jsonify(results)
+    try:
+        user_email = session.get('user_id', 'Sandman@session-42.com')
+        
+        # Get storage manager
+        storage_manager = await get_storage_manager()
+        
+        # Get user ID
+        async with storage_manager.postgres.conn_pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT id FROM users WHERE email = $1", user_email)
+            if not user:
+                return jsonify({'error': 'User not found', 'emails': []}), 404
+            
+            user_id = user['id']
+            
+            # Get all emails for user
+            emails = await conn.fetch("""
+                SELECT e.*, u.email as user_email
+                FROM emails e
+                JOIN users u ON e.user_id = u.id
+                WHERE e.user_id = $1
+                ORDER BY e.created_at DESC
+                LIMIT 200
+            """, user_id)
+        
+        # Format email results
+        email_list = []
+        for email in emails:
+            try:
+                metadata = json.loads(email['metadata']) if email['metadata'] else {}
+            except:
+                metadata = {}
+                
+            email_data = {
+                'id': email['id'],
+                'subject': metadata.get('subject', 'No Subject'),
+                'from': metadata.get('from', 'Unknown'),
+                'to': metadata.get('to', 'Unknown'),
+                'date': email['created_at'].isoformat() if email['created_at'] else None,
+                'content': email['content'][:2000] if email['content'] else 'No content',  # Longer content for full view
+                'user_email': email['user_email']
+            }
+            email_list.append(email_data)
+        
+        return jsonify({
+            'success': True,
+            'emails': email_list,
+            'total': len(email_list),
+            'user_email': user_email
+        })
+        
+    except Exception as e:
+        logger.error(f"Get all emails failed: {str(e)}")
+        return jsonify({
+            'error': f'Failed to get emails: {str(e)}',
+            'emails': []
+        }), 500
 
 # === Intelligence Analysis Routes ===
 
@@ -983,6 +1208,259 @@ async def get_knowledge_tree():
             'tree': tree_data,
             'user_id': user_id
         })
+
+@api_bp.route('/intelligence/build-knowledge-tree', methods=['POST'])
+@async_route_no_auth
+async def build_knowledge_tree():
+    """
+    Build knowledge tree using Claude analysis on user's email data
+    """
+    from flask import session
+    user_email = session.get('user_id', 'Sandman@session-42.com')  # Default for testing
+    
+    # Get request parameters
+    time_window_days = request.json.get('time_window_days', 30) if request.json else 30
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Get storage manager with retry logic
+            storage_manager = await get_storage_manager()
+            
+            # Ensure PostgreSQL connection is healthy before proceeding
+            if not await storage_manager.postgres.health_check():
+                logger.warning(f"PostgreSQL connection unhealthy, attempting reconnect (attempt {attempt + 1})")
+                await storage_manager.postgres.reset_connection_pool()
+                await asyncio.sleep(2)
+                
+                # Verify connection is working
+                if not await storage_manager.postgres.health_check():
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise Exception("Failed to establish stable database connection")
+            
+            # Get the actual user ID from the email with retry logic
+            user_id = None
+            for db_attempt in range(3):
+                try:
+                    async with storage_manager.postgres.conn_pool.acquire() as conn:
+                        user_row = await conn.fetchrow("""
+                            SELECT id FROM users WHERE email = $1
+                        """, user_email)
+                        
+                        if not user_row:
+                            # Create user if doesn't exist
+                            user_row = await conn.fetchrow("""
+                                INSERT INTO users (email, google_id)
+                                VALUES ($1, $1)
+                                ON CONFLICT (email) DO UPDATE
+                                SET email = $1
+                                RETURNING id
+                            """, user_email)
+                        
+                        user_id = int(user_row['id'])
+                        break
+                        
+                except Exception as db_error:
+                    if "another operation is in progress" in str(db_error).lower() and db_attempt < 2:
+                        logger.warning(f"Database conflict, retrying user lookup (attempt {db_attempt + 1})")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise db_error
+            
+            if user_id is None:
+                raise Exception("Failed to get or create user ID")
+            
+            logger.info(f"Starting knowledge tree building for user {user_id} ({user_email})")
+            
+            # Check if we have enough email data with retry logic
+            email_count = 0
+            for db_attempt in range(3):
+                try:
+                    async with storage_manager.postgres.conn_pool.acquire() as conn:
+                        email_count = await conn.fetchval("""
+                            SELECT COUNT(*) FROM emails WHERE user_id = $1
+                        """, user_id)
+                    break
+                except Exception as db_error:
+                    if "another operation is in progress" in str(db_error).lower() and db_attempt < 2:
+                        logger.warning(f"Database conflict, retrying email count (attempt {db_attempt + 1})")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise db_error
+            
+            if email_count < 10:
+                return jsonify({
+                    'success': False,
+                    'error': f'Insufficient email data. Found {email_count} emails, need at least 10 for knowledge tree building.',
+                    'suggestion': 'Please sync more emails first using the email sync feature.'
+                }), 400
+            
+            logger.info(f"Found {email_count} emails for knowledge tree building")
+            
+            # Get recent emails with metadata using retry logic
+            emails = []
+            for db_attempt in range(3):
+                try:
+                    async with storage_manager.postgres.conn_pool.acquire() as conn:
+                        # Simplified query to avoid interval issues
+                        emails = await conn.fetch("""
+                            SELECT content, metadata, created_at 
+                            FROM emails 
+                            WHERE user_id = $1 
+                            ORDER BY created_at DESC
+                            LIMIT 500
+                        """, user_id)
+                    break
+                except Exception as db_error:
+                    if "another operation is in progress" in str(db_error).lower() and db_attempt < 2:
+                        logger.warning(f"Database conflict, retrying email fetch (attempt {db_attempt + 1})")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise db_error
+            
+            # Build basic knowledge tree structure
+            knowledge_tree = {
+                'user_id': user_id,
+                'time_window': {
+                    'days': time_window_days,
+                    'start_date': (datetime.utcnow() - timedelta(days=time_window_days)).isoformat(),
+                    'end_date': datetime.utcnow().isoformat()
+                },
+                'email_count': len(emails),
+                'topics': [],
+                'entities': [],
+                'relationships': [],
+                'insights': {},
+                'created_at': datetime.utcnow().isoformat(),
+                'version': '1.0'
+            }
+            
+            # Extract basic topics from email subjects and content
+            topics = set()
+            entities = set()
+            
+            for email in emails:
+                try:
+                    metadata = email['metadata'] if isinstance(email['metadata'], dict) else json.loads(email['metadata'] or '{}')
+                    subject = metadata.get('subject', '').lower()
+                    content = (email['content'] or '').lower()
+                    
+                    # Simple topic extraction (in production, use Claude)
+                    if 'meeting' in subject or 'meeting' in content:
+                        topics.add('meetings')
+                    if 'project' in subject or 'project' in content:
+                        topics.add('projects')
+                    if 'deadline' in subject or 'deadline' in content:
+                        topics.add('deadlines')
+                    if 'budget' in subject or 'budget' in content:
+                        topics.add('budget')
+                    if 'report' in subject or 'report' in content:
+                        topics.add('reports')
+                    if 'schedule' in subject or 'schedule' in content:
+                        topics.add('scheduling')
+                    
+                    # Extract email addresses as entities
+                    from_email = metadata.get('from', '')
+                    to_emails = metadata.get('to', [])
+                    
+                    if from_email and '@' in from_email:
+                        entities.add(from_email)
+                    
+                    for to_email in (to_emails if isinstance(to_emails, list) else []):
+                        if '@' in str(to_email):
+                            entities.add(str(to_email))
+                            
+                except Exception as e:
+                    logger.warning(f"Error processing email for knowledge tree: {e}")
+                    continue
+            
+            knowledge_tree['topics'] = list(topics)
+            knowledge_tree['entities'] = list(entities)[:50]  # Limit entities
+            
+            # Store the knowledge tree in database with retry logic
+            for db_attempt in range(3):
+                try:
+                    async with storage_manager.postgres.conn_pool.acquire() as conn:
+                        await conn.execute("""
+                            INSERT INTO knowledge_tree (user_id, tree_data)
+                            VALUES ($1, $2)
+                            ON CONFLICT (user_id) DO UPDATE
+                            SET tree_data = EXCLUDED.tree_data,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, user_id, json.dumps(knowledge_tree))
+                    break
+                except Exception as db_error:
+                    if "another operation is in progress" in str(db_error).lower() and db_attempt < 2:
+                        logger.warning(f"Database conflict, retrying knowledge tree save (attempt {db_attempt + 1})")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise db_error
+            
+            # Cache the knowledge tree
+            try:
+                await storage_manager.cache.cache_user_data(
+                    user_id, 'knowledge_tree', knowledge_tree
+                )
+            except Exception as cache_error:
+                logger.warning(f"Failed to cache knowledge tree: {cache_error}")
+            
+            logger.info(f"Successfully built knowledge tree for user {user_id}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Knowledge tree successfully built',
+                'knowledge_tree_summary': {
+                    'time_window': knowledge_tree['time_window'],
+                    'email_count': knowledge_tree['email_count'],
+                    'topic_count': len(knowledge_tree['topics']),
+                    'entity_count': len(knowledge_tree['entities']),
+                    'topics': knowledge_tree['topics'][:10],  # Show first 10 topics
+                    'entities': knowledge_tree['entities'][:10],  # Show first 10 entities
+                    'created_at': knowledge_tree['created_at']
+                }
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Knowledge tree building failed (attempt {attempt + 1}): {error_msg}")
+            
+            # Check if this is a retryable error
+            if any(phrase in error_msg.lower() for phrase in [
+                "another operation is in progress",
+                "connection was closed",
+                "event loop is closed",
+                "pool is closed"
+            ]) and attempt < max_retries - 1:
+                logger.warning(f"Retryable error, attempting again (attempt {attempt + 1})")
+                
+                # Reset storage manager connections
+                try:
+                    storage_manager = await get_storage_manager()
+                    await storage_manager.postgres.reset_connection_pool()
+                except:
+                    pass
+                
+                await asyncio.sleep(2)
+                continue
+            else:
+                # Non-retryable error or max retries reached
+                return jsonify({
+                    'success': False,
+                    'error': error_msg,
+                    'attempt': attempt + 1
+                }), 500
+    
+    # If we get here, all retries failed
+    return jsonify({
+        'success': False,
+        'error': 'Knowledge tree building failed after multiple retries due to database connection issues'
+    }), 500
 
 # === Intelligence Routes ===
 

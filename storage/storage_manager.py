@@ -350,6 +350,37 @@ class StorageManager:
         except Exception as e:
             logger.error(f"Store knowledge tree error: {str(e)}")
             return False
+    
+    async def get_knowledge_tree(self, user_id: int) -> Optional[Dict]:
+        """Get knowledge tree from storage"""
+        try:
+            # Try cache first
+            cached_tree = await self.cache.get_user_data(user_id, 'knowledge_tree')
+            if cached_tree:
+                return cached_tree
+            
+            # Get from PostgreSQL
+            async with self.postgres.conn_pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT tree_data FROM knowledge_tree WHERE user_id = $1
+                """, user_id)
+                
+                if not row:
+                    return None
+                
+                tree_data = row['tree_data']
+                
+                # Cache for future requests
+                if tree_data:
+                    await self.cache.cache_user_data(
+                        user_id, 'knowledge_tree', tree_data
+                    )
+                
+                return tree_data
+                
+        except Exception as e:
+            logger.error(f"Get knowledge tree error: {str(e)}")
+            return None
 
 
 # Global instance for easy access
