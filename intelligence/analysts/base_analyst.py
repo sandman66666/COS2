@@ -11,11 +11,24 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
+import os
 
 import anthropic
 from utils.logging import structured_logger as logger
 from storage.storage_manager import get_storage_manager
 from config.settings import ANTHROPIC_API_KEY
+from dataclasses import dataclass
+
+@dataclass
+class AnalysisResult:
+    """Standard analysis result format"""
+    analyst_type: str
+    entities: List[Dict]
+    relationships: List[Dict]
+    insights: List[str]
+    confidence: float
+    topics: List[str]
+    metadata: Dict[str, Any]
 
 class BaseAnalyst(ABC):
     """
@@ -25,18 +38,25 @@ class BaseAnalyst(ABC):
     LLM interaction, and multi-tenant isolation.
     """
     
-    def __init__(self, user_id: int, anthropic_api_key: str = None):
+    def __init__(self, user_id: int, model: str = None):
         """
         Initialize base analyst
         
         Args:
             user_id: User ID for multi-tenant isolation
-            anthropic_api_key: Optional API key for Claude Opus
+            model: Optional model name for Claude Opus
         """
         self.user_id = user_id
-        self.api_key = anthropic_api_key or ANTHROPIC_API_KEY
-        self.model = "claude-3-opus-20240229"
-        self.client = None
+        # Use environment variable for API key
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+        
+        self.client = anthropic.Anthropic(api_key=api_key)
+        
+        # Use environment variable for model, with fallback to claude-3-opus
+        self.model = model or os.getenv('CLAUDE_MODEL', 'claude-3-opus-20240229')
+        
         self.storage_manager = None
         
         # Required to be set by subclasses
@@ -44,6 +64,8 @@ class BaseAnalyst(ABC):
         self.analyst_description = "Generic intelligence analyst"
         self.max_tokens = 4000
         self.temperature = 0.3
+        
+        logger.info(f"Initialized {self.__class__.__name__} with model: {self.model}")
     
     async def initialize(self) -> bool:
         """
@@ -53,9 +75,6 @@ class BaseAnalyst(ABC):
             True if initialization successful
         """
         try:
-            # Initialize Claude Opus client
-            self.client = anthropic.Anthropic(api_key=self.api_key)
-            
             # Get storage manager for result persistence
             self.storage_manager = await get_storage_manager()
             

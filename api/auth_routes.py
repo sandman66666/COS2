@@ -41,7 +41,7 @@ def index():
     """Main index route - redirects to home if authenticated"""
     user = get_current_user()
     if not user:
-        return redirect(url_for('auth.login'))
+        return redirect('/login')
     
     # Redirect to home page
     return redirect(url_for('auth.home'))
@@ -49,29 +49,11 @@ def index():
 @auth_bp.route('/home')
 @require_auth
 def home():
-    """Home page route - requires authentication"""
+    """Home page route - redirects to dashboard"""
     user = get_current_user()
     
-    return render_template('home.html', 
-                           user_email=user['email'],
-                           user_id=user.get('id'),
-                           session_id=session.get('session_id'),
-                           cache_buster=int(time.time()))
-
-@auth_bp.route('/login')
-def login():
-    """Login page with Google OAuth"""
-    # Check for logout/switching parameters
-    logged_out = request.args.get('logged_out') == 'true'
-    force_logout = request.args.get('force_logout') == 'true'
-    
-    context = {
-        'logged_out': logged_out,
-        'force_logout': force_logout,
-        'switching_users': logged_out or force_logout
-    }
-    
-    return render_template('login.html', **context)
+    # Redirect to dashboard instead of trying to render home.html
+    return redirect('/dashboard')
 
 @auth_bp.route('/auth/google')
 def google_auth():
@@ -105,7 +87,7 @@ def google_auth():
         
     except Exception as e:
         logger.error("Failed to initiate Google OAuth", error=str(e))
-        return redirect(url_for('auth.login') + '?error=oauth_init_failed')
+        return redirect('/login?error=oauth_init_failed')
 
 @auth_bp.route('/auth/google/callback')
 @auth_bp.route('/auth/callback')  # Additional route for compatibility
@@ -120,18 +102,18 @@ async def google_callback():
         
         if error:
             logger.error("OAuth error returned", error=error)
-            return redirect(url_for('auth.login') + f'?error={error}')
+            return redirect('/login' + f'?error={error}')
         
         if not code:
             logger.error("No authorization code received")
-            return redirect(url_for('auth.login') + '?error=no_code')
+            return redirect('/login' + '?error=no_code')
         
         # Validate state (anti-CSRF) BEFORE clearing session
         expected_state = session.get('oauth_state')
         if state != expected_state:
             logger.error("OAuth state mismatch - potential CSRF attempt", 
                          received=state, expected=expected_state)
-            return redirect(url_for('auth.login') + '?error=state_mismatch')
+            return redirect('/login' + '?error=state_mismatch')
         
         # Handle OAuth callback with Gmail auth handler
         result = gmail_auth.handle_oauth_callback(
@@ -142,7 +124,7 @@ async def google_callback():
         if not result.get('success'):
             error_msg = result.get('error', 'Unknown OAuth error')
             logger.error("OAuth callback failed", error=error_msg)
-            return redirect(url_for('auth.login') + f'?error=oauth_failed')
+            return redirect('/login' + f'?error=oauth_failed')
         
         # Extract user info from OAuth result
         user_info = result.get('user_info', {})
@@ -153,7 +135,7 @@ async def google_callback():
         
         if not user_email:
             logger.error("No email received from OAuth")
-            return redirect(url_for('auth.login') + '?error=no_email')
+            return redirect('/login' + '?error=no_email')
         
         # Clear session AFTER validation and create new authenticated session
         session.clear()
@@ -193,7 +175,7 @@ async def google_callback():
         
     except Exception as e:
         logger.error("OAuth callback error", error=str(e))
-        return redirect(url_for('auth.login') + '?error=callback_failed')
+        return redirect('/login' + '?error=callback_failed')
 
 def create_test_session():
     """DEPRECATED: Removed test session fallback for production"""
@@ -211,7 +193,7 @@ def logout():
     logger.info("User logged out", user_id=user_id, email=user_email)
     
     # Redirect to login with cache-busting parameter
-    response = redirect(url_for('auth.login') + '?logged_out=true')
+    response = redirect('/login' + '?logged_out=true')
     
     # Clear auth token cookie
     response.set_cookie('auth_token', '', expires=0, path='/')
@@ -237,7 +219,7 @@ def force_logout():
                    user_id=user_id, email=user_email)
         
         # Create response with aggressive cache clearing
-        response = redirect(url_for('auth.login') + 
+        response = redirect('/login' + 
                           f'?force_logout=true&t={int(time.time())}')
         
         # Clear all possible cookies and cache
@@ -300,6 +282,27 @@ def get_token():
     return jsonify({
         'token': user_session.token,
         'expires_at': user_session.expires_at.isoformat()
+    })
+
+@auth_bp.route('/debug/oauth-config')
+def debug_oauth_config():
+    """Debug OAuth configuration - only available in development"""
+    # Allow in development mode or when ENV is not explicitly set to production
+    env = current_app.config.get('ENV', 'development')
+    if env == 'production':
+        return jsonify({'error': 'Not available in production'}), 403
+    
+    from config.settings import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
+    
+    return jsonify({
+        'client_id_configured': bool(GOOGLE_CLIENT_ID),
+        'client_id_length': len(GOOGLE_CLIENT_ID) if GOOGLE_CLIENT_ID else 0,
+        'client_id_starts_with': GOOGLE_CLIENT_ID[:20] + '...' if GOOGLE_CLIENT_ID and len(GOOGLE_CLIENT_ID) > 20 else 'Not set',
+        'client_secret_configured': bool(GOOGLE_CLIENT_SECRET),
+        'client_secret_length': len(GOOGLE_CLIENT_SECRET) if GOOGLE_CLIENT_SECRET else 0,
+        'redirect_uri': GOOGLE_REDIRECT_URI,
+        'redirect_uri_configured': bool(GOOGLE_REDIRECT_URI),
+        'environment': env
     })
 
 @auth_bp.route('/debug/session')

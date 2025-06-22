@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+load_dotenv(dotenv_path=env_path, override=True)
 
 # Database settings
 POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'localhost')
@@ -31,8 +31,8 @@ CHROMA_PORT = int(os.getenv('CHROMA_PORT', 8000))
 # Google OAuth settings - Updated for port 8080
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
-# Default to port 8080 to match Google Cloud Console configuration
-GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8080/api/auth/callback')
+# Default to match the auth routes: /auth/callback instead of /api/auth/callback
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8080/auth/callback')
 GOOGLE_SCOPES = [
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',

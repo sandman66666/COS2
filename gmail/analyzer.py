@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from collections import Counter, defaultdict
 from typing import Dict, List, Set, Tuple, Optional, Any
+from email.utils import parsedate_to_datetime
 
 from config.constants import (
     TrustTiers, EmailMetadata, 
@@ -21,24 +22,24 @@ from config.constants import (
 from utils.logging import structured_logger as logger
 from gmail.client import GmailClient
 from storage.storage_manager import get_storage_manager
+from intelligence.behavioral_intelligence_system import BehavioralIntelligenceSystem
 
 class SentEmailAnalyzer:
     """
-    Analyzes sent emails to extract trusted contacts and communication patterns
-    Ensures proper multi-tenant isolation for user data
+    Sent email analysis with automatic behavioral intelligence
+    
+    Now includes behavioral pattern analysis for all communication partners
     """
     
-    def __init__(self, user_id: int, storage_manager=None):
-        """
-        Initialize analyzer for a specific user
-        
-        Args:
-            user_id: User ID for multi-tenant isolation
-            storage_manager: Optional pre-initialized storage manager
-        """
+    def __init__(self, user_id: int, storage_manager):
         self.user_id = user_id
         self.storage_manager = storage_manager
         self.gmail_client = None
+        
+        # ADD: Automatic behavioral intelligence
+        self.behavioral_system = BehavioralIntelligenceSystem(user_id)
+        
+        logger.info(f"SentEmailAnalyzer initialized with behavioral intelligence for user {user_id}")
     
     async def initialize(self):
         """Initialize connections and resources"""
@@ -104,7 +105,7 @@ class SentEmailAnalyzer:
                 }
             
             # Process emails to extract contacts
-            contacts_data = self._analyze_sent_emails(sent_emails)
+            contacts_data = await self._analyze_sent_emails(sent_emails)
             
             # Cache results
             await self.storage_manager.cache.cache_user_data(
@@ -135,24 +136,28 @@ class SentEmailAnalyzer:
                 'contacts': []
             }
     
-    def _analyze_sent_emails(self, emails: List[Dict]) -> Dict[str, Any]:
+    async def _analyze_sent_emails(self, emails: List[Dict]) -> Dict[str, Any]:
         """
-        Analyze sent emails to extract trusted contacts
+        Analyze sent emails to extract trusted contacts WITH behavioral intelligence
         
         Core innovation: This method implements the key insight that 
-        sent emails reveal trusted contacts based on frequency and recency
+        sent emails reveal trusted contacts based on frequency and recency,
+        NOW ENHANCED with automatic behavioral pattern analysis
         
         Args:
             emails: List of sent email messages
             
         Returns:
-            Dictionary with contacts and stats
+            Dictionary with contacts, stats, and behavioral insights
         """
         # Track email counts and most recent communication
         email_counts = Counter()
         last_email_date = {}
         email_subjects = defaultdict(list)
         domains = Counter()
+        
+        # NEW: Track behavioral insights for all contacts
+        contact_behavioral_insights = {}
         
         # Process each email
         for email in emails:
@@ -164,34 +169,59 @@ class SentEmailAnalyzer:
             
             # Extract date and ensure it's timezone-aware
             date_str = email.get(EmailMetadata.DATE)
-            try:
-                # Parse the date string and ensure it's timezone-aware
-                if date_str:
-                    # Handle various date formats
-                    if 'Z' in date_str:
-                        # UTC format with Z
-                        email_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    elif '+' in date_str or '-' in date_str[-6:]:
-                        # Already has timezone info
-                        email_date = datetime.fromisoformat(date_str)
-                    else:
-                        # No timezone info, assume UTC
-                        email_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-                else:
-                    # No date, use current time
+            
+            # Parse and ensure timezone awareness
+            email_date = datetime.now(timezone.utc)  # Default fallback
+            if date_str:
+                try:
+                    # First try to parse the RFC 2822 format (most common in email headers)
+                    email_date = parsedate_to_datetime(date_str)
+                    
+                    # Ensure timezone awareness
+                    if email_date.tzinfo is None:
+                        email_date = email_date.replace(tzinfo=timezone.utc)
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to parse date '{date_str}': {e}, using current time")
                     email_date = datetime.now(timezone.utc)
-                    
-                # Double-check timezone awareness
-                if email_date.tzinfo is None:
-                    email_date = email_date.replace(tzinfo=timezone.utc)
-                    
-            except (ValueError, TypeError) as e:
-                # If parsing fails, use current time in UTC
-                logger.warning(f"Failed to parse email date '{date_str}': {e}")
-                email_date = datetime.now(timezone.utc)
             
             # Extract subject for context
             subject = email.get(EmailMetadata.SUBJECT, '(No Subject)')
+            
+            # NEW: Process behavioral intelligence for this email
+            try:
+                # Convert email format for behavioral analysis
+                behavioral_data = {
+                    'sender': 'user',  # This is a sent email, so user is sender
+                    'body_text': email.get(EmailMetadata.BODY_TEXT, ''),
+                    'subject': email.get(EmailMetadata.SUBJECT, ''),
+                    'date': date_str,
+                    'to': recipients,
+                    'cc': email.get(EmailMetadata.CC, []),
+                    'is_sent': True
+                }
+                
+                # Analyze each recipient's behavioral patterns from this email
+                for recipient in recipients:
+                    if '@' in recipient and recipient not in contact_behavioral_insights:
+                        # Create recipient-focused data for behavioral analysis
+                        recipient_data = {
+                            **behavioral_data,
+                            'recipient': recipient,  # Current recipient
+                            'interaction_type': 'sent_to'
+                        }
+                        
+                        # Run behavioral analysis
+                        behavioral_result = await self.behavioral_system.analyze_message_for_behavioral_insights(
+                            recipient_data, data_source="email"
+                        )
+                        
+                        if behavioral_result:
+                            contact_behavioral_insights[recipient] = behavioral_result
+                            logger.info(f"🧠 Behavioral profile created for sent contact: {recipient}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to analyze behavioral patterns for email: {e}")
             
             # Process each recipient
             for recipient in recipients:
@@ -231,7 +261,7 @@ class SentEmailAnalyzer:
                 # Track domains for organization analysis
                 domains[domain] += 1
         
-        # Build contact list with trust tier assignment
+        # Build contact list with trust tier assignment AND behavioral insights
         contacts = []
         
         # Get top domains (limit to control memory usage)
@@ -240,7 +270,7 @@ class SentEmailAnalyzer:
         # Get current time for recency calculations
         current_time = datetime.now(timezone.utc)
         
-        # Now build the list of contacts with trust tiers
+        # Now build the list of contacts with trust tiers AND behavioral intelligence
         for email_address, count in email_counts.most_common():
             # Calculate recency score (higher for more recent emails)
             last_contact_date = last_email_date[email_address]
@@ -276,7 +306,7 @@ class SentEmailAnalyzer:
             contact = {
                 'email': email_address,
                 'frequency': count,
-                'last_contact': last_contact_date.isoformat() if last_contact_date and last_contact_date.tzinfo else None,  # Only create ISO if timezone-aware
+                'last_contact': last_contact_date.isoformat() if last_contact_date and last_contact_date.tzinfo else None,
                 'trust_tier': trust_tier,
                 'domain': domain,
                 'recent_subjects': email_subjects[email_address],
@@ -284,17 +314,49 @@ class SentEmailAnalyzer:
                 'days_since_contact': days_since
             }
             
-            # Additional safety check - ensure last_contact is string, not datetime
-            if isinstance(contact.get('last_contact'), datetime):
-                logger.warning(f"Contact {email_address} has datetime object instead of string - converting")
-                dt = contact['last_contact']
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                contact['last_contact'] = dt.isoformat()
+            # NEW: Add behavioral intelligence if available
+            if email_address in contact_behavioral_insights:
+                behavioral_data = contact_behavioral_insights[email_address]
+                contact['behavioral_intelligence'] = {
+                    'communication_style': behavioral_data.get('behavioral_summary', {}).get('communication_style'),
+                    'influence_level': behavioral_data.get('behavioral_summary', {}).get('influence_level'),
+                    'confidence_score': behavioral_data.get('behavioral_summary', {}).get('confidence_score'),
+                    'professional_insights': behavioral_data.get('professional_intelligence', {}),
+                    'timing_intelligence': behavioral_data.get('timing_intelligence', {}),
+                    'enhanced_with_behavioral_ai': True
+                }
+                
+                # Boost trust tier for high-influence contacts
+                if behavioral_data.get('behavioral_summary', {}).get('influence_level') == 'high':
+                    if contact['trust_tier'] == TrustTiers.MEDIUM:
+                        contact['trust_tier'] = TrustTiers.HIGH
+                        contact['score'] = min(100.0, contact['score'] * 1.2)  # 20% boost
+                        
+                logger.info(f"📈 Enhanced contact {email_address} with behavioral intelligence: {contact['behavioral_intelligence']['communication_style']} style")
             
             contacts.append(contact)
         
-        # Return complete analysis
+        # Return complete analysis with behavioral insights
+        behavioral_summary = {
+            'contacts_with_behavioral_data': len(contact_behavioral_insights),
+            'behavioral_coverage': len(contact_behavioral_insights) / max(1, len(contacts)) * 100,
+            'influence_distribution': {
+                'high': sum(1 for insight in contact_behavioral_insights.values() 
+                           if insight.get('behavioral_summary', {}).get('influence_level') == 'high'),
+                'medium': sum(1 for insight in contact_behavioral_insights.values() 
+                             if insight.get('behavioral_summary', {}).get('influence_level') == 'medium'),
+                'low': sum(1 for insight in contact_behavioral_insights.values() 
+                          if insight.get('behavioral_summary', {}).get('influence_level') == 'low')
+            },
+            'communication_styles': defaultdict(int)
+        }
+        
+        # Count communication styles
+        for insight in contact_behavioral_insights.values():
+            style = insight.get('behavioral_summary', {}).get('communication_style')
+            if style:
+                behavioral_summary['communication_styles'][style] += 1
+        
         return {
             'success': True,
             'contacts': contacts,
@@ -305,6 +367,7 @@ class SentEmailAnalyzer:
                 'medium': sum(1 for c in contacts if c['trust_tier'] == TrustTiers.MEDIUM),
                 'low': sum(1 for c in contacts if c['trust_tier'] == TrustTiers.LOW)
             },
+            'behavioral_intelligence_summary': behavioral_summary,
             'analysis_timestamp': datetime.now(timezone.utc).isoformat(),
         }
     

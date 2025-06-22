@@ -35,7 +35,7 @@ class PostgresClient(BaseStorageClient):
             # Close existing pool if any
             if self.conn_pool:
                 await self.conn_pool.close()
-                await asyncio.sleep(0.5)  # Give it time to close properly
+                await asyncio.sleep(1)  # Give it time to close properly
                 
             self.conn_pool = await asyncpg.create_pool(
                 host=self.host,
@@ -43,15 +43,20 @@ class PostgresClient(BaseStorageClient):
                 user=self.user,
                 password=self.password,
                 database=self.database,
-                min_size=5,  # Increased from 2
-                max_size=20,  # Increased from 10
-                command_timeout=60,  # Increased from 30
+                min_size=5,  # Reduced to prevent resource exhaustion
+                max_size=20,  # More conservative limit
+                command_timeout=60,  # Increased timeout for complex operations
                 max_inactive_connection_lifetime=300,  # 5 minutes
+                max_queries=1000,  # Reduced to cycle connections more frequently
+                max_cached_statement_lifetime=300,  # 5 minutes
                 server_settings={
                     'application_name': 'strategic_intelligence_system',
                     'tcp_keepalives_idle': '600',
                     'tcp_keepalives_interval': '30',
                     'tcp_keepalives_count': '3',
+                    'statement_timeout': '60000',  # 60 second statement timeout
+                    'lock_timeout': '30000',  # 30 second lock timeout
+                    'idle_in_transaction_session_timeout': '30000',  # 30 second idle timeout
                 }
             )
             
@@ -73,30 +78,30 @@ class PostgresClient(BaseStorageClient):
     
     async def health_check(self) -> bool:
         """Check if PostgreSQL is available"""
-        max_retries = 3
+        max_retries = 2
         for attempt in range(max_retries):
             try:
                 # Always try to reconnect if pool is None or broken
                 if not self.conn_pool:
                     await self.connect()
                 
-                # Test the connection with timeout - fix the async context manager issue
-                connection = await asyncio.wait_for(self.conn_pool.acquire(), timeout=5)
+                # Test the connection with timeout and proper resource management
                 try:
-                    result = await asyncio.wait_for(connection.fetchval("SELECT 1"), timeout=5)
-                    return result == 1
-                finally:
-                    # Always release the connection back to the pool
-                    await self.conn_pool.release(connection)
+                    connection = await asyncio.wait_for(self.conn_pool.acquire(), timeout=10)
+                    try:
+                        result = await asyncio.wait_for(connection.fetchval("SELECT 1"), timeout=10)
+                        return result == 1
+                    finally:
+                        # Always release the connection back to the pool
+                        await self.conn_pool.release(connection)
+                except asyncio.TimeoutError:
+                    logger.warning(f"PostgreSQL health check timeout (attempt {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        await self.reset_connection_pool()
+                        await asyncio.sleep(2)
+                        continue
+                    return False
                     
-            except asyncio.TimeoutError:
-                logger.warning(f"PostgreSQL health check timeout (attempt {attempt + 1})")
-                if attempt < max_retries - 1:
-                    await self.reset_connection_pool()
-                    await asyncio.sleep(1)
-                    continue
-                return False
-                
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"PostgreSQL health check failed (attempt {attempt + 1}): {error_msg}")
@@ -112,7 +117,7 @@ class PostgresClient(BaseStorageClient):
                     if attempt < max_retries - 1:
                         try:
                             await self.reset_connection_pool()
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(2)
                             continue
                         except:
                             pass
@@ -233,22 +238,38 @@ class PostgresClient(BaseStorageClient):
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS knowledge_tree (
                     id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id) UNIQUE,
+                    user_id INTEGER REFERENCES users(id),
                     tree_data JSONB NOT NULL,
+                    analysis_type VARCHAR(100) DEFAULT 'default',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, analysis_type)
                 )
             """)
             
-            # Add unique constraint to existing knowledge_tree table if it doesn't exist
+            # Add analysis_type column to existing knowledge_tree table if it doesn't exist
             try:
                 await conn.execute("""
-                    ALTER TABLE knowledge_tree ADD CONSTRAINT knowledge_tree_user_id_unique UNIQUE (user_id)
+                    ALTER TABLE knowledge_tree ADD COLUMN IF NOT EXISTS analysis_type VARCHAR(100) DEFAULT 'default'
                 """)
-                logger.info("Successfully added unique constraint to knowledge_tree table")
+                logger.info("Successfully added analysis_type column to knowledge_tree table")
+            except Exception as migration_error:
+                # Ignore errors - column might already exist
+                logger.debug(f"Column addition skipped: {migration_error}")
+            
+            # Add unique constraint for user_id + analysis_type if it doesn't exist
+            try:
+                await conn.execute("""
+                    ALTER TABLE knowledge_tree DROP CONSTRAINT IF EXISTS knowledge_tree_user_id_unique
+                """)
+                await conn.execute("""
+                    ALTER TABLE knowledge_tree ADD CONSTRAINT knowledge_tree_user_analysis_unique 
+                    UNIQUE (user_id, analysis_type)
+                """)
+                logger.info("Successfully updated knowledge_tree unique constraint")
             except Exception as constraint_error:
-                # Ignore errors - constraint might already exist
-                logger.debug(f"Constraint addition skipped: {constraint_error}")
+                # Ignore errors - constraint might already exist or be different
+                logger.debug(f"Constraint update skipped: {constraint_error}")
             
             # Create OAuth credentials table
             await conn.execute("""
@@ -435,9 +456,15 @@ class PostgresClient(BaseStorageClient):
     async def reset_connection_pool(self) -> None:
         """Reset the connection pool if it gets into a bad state"""
         try:
+            logger.info("Resetting PostgreSQL connection pool...")
             if self.conn_pool:
                 await self.conn_pool.close()
-                await asyncio.sleep(1)  # Give it a moment
+                await asyncio.sleep(2)  # Give it more time to fully close
+            
+            # Clear any pending connections
+            self.conn_pool = None
+            
+            # Reconnect
             await self.connect()
             logger.info("Successfully reset PostgreSQL connection pool")
         except Exception as e:

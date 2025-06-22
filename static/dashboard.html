@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contact Intelligence Dashboard - Session42</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
@@ -12,10 +12,24 @@
         <header class="dashboard-header">
             <div class="header-content">
                 <h1><i class="fas fa-brain"></i> Contact Intelligence Dashboard</h1>
-                <div class="header-status">
-                    <span id="status-indicator" class="status-indicator">
-                        <i class="fas fa-circle"></i> <span id="status-text">Ready</span>
-                    </span>
+                <div class="header-controls">
+                    <div class="header-status">
+                        <span id="status-indicator" class="status-indicator">
+                            <i class="fas fa-circle"></i> <span id="status-text">Ready</span>
+                        </span>
+                    </div>
+                    <div class="user-section">
+                        <div class="user-info">
+                            <i class="fas fa-user-circle"></i>
+                            <span id="user-email">Loading...</span>
+                        </div>
+                        <button onclick="logout()" class="btn btn-logout" title="Sign out">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                    <button onclick="flushDatabase()" class="btn btn-flush" title="Clear all data and start fresh">
+                        <i class="fas fa-trash-alt"></i> Flush DB
+                    </button>
                 </div>
             </div>
         </header>
@@ -83,9 +97,17 @@
                 </div>
                 <div class="step-content">
                     <p>Connect your Gmail account to fetch email data for intelligence analysis.</p>
-                    <button onclick="connectGmail()" class="btn btn-primary">
-                        <i class="fab fa-google"></i> Connect Gmail
-                    </button>
+                    <div class="step-actions">
+                        <button onclick="connectGmail()" class="btn btn-primary">
+                            <i class="fab fa-google"></i> Connect Gmail
+                        </button>
+                        <button onclick="syncEmails()" class="btn btn-secondary">
+                            <i class="fas fa-sync"></i> Fetch Emails
+                        </button>
+                        <button onclick="inspectEmails()" class="btn btn-inspect">
+                            <i class="fas fa-database"></i> Inspect Stored Emails
+                        </button>
+                    </div>
                     <div id="gmail-status" class="status-message"></div>
                 </div>
             </div>
@@ -98,9 +120,14 @@
                 </div>
                 <div class="step-content">
                     <p>Extract and analyze contacts from your email communications.</p>
-                    <button onclick="extractContacts()" class="btn btn-primary">
-                        <i class="fas fa-user-plus"></i> Extract Contacts
-                    </button>
+                    <div class="step-actions">
+                        <button onclick="extractContacts()" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> Extract Contacts
+                        </button>
+                        <button onclick="inspectContacts()" class="btn btn-inspect">
+                            <i class="fas fa-database"></i> Inspect Stored Contacts
+                        </button>
+                    </div>
                     <div id="extraction-status" class="status-message"></div>
                 </div>
             </div>
@@ -113,9 +140,14 @@
                 </div>
                 <div class="step-content">
                     <p>Enhance contact profiles with additional intelligence data.</p>
-                    <button onclick="augmentContacts()" class="btn btn-primary">
-                        <i class="fas fa-magic"></i> Augment Contacts
-                    </button>
+                    <div class="step-actions">
+                        <button onclick="augmentContacts()" class="btn btn-primary">
+                            <i class="fas fa-magic"></i> Augment Contacts
+                        </button>
+                        <button onclick="inspectAugmentedContacts()" class="btn btn-inspect">
+                            <i class="fas fa-database"></i> Inspect Augmented Data
+                        </button>
+                    </div>
                     <div id="augmentation-status" class="status-message"></div>
                 </div>
             </div>
@@ -128,9 +160,14 @@
                 </div>
                 <div class="step-content">
                     <p>Generate AI-powered intelligence insights for each contact.</p>
-                    <button onclick="generateIntelligence()" class="btn btn-primary">
-                        <i class="fas fa-cogs"></i> Generate Intelligence
-                    </button>
+                    <div class="step-actions">
+                        <button onclick="generateIntelligence()" class="btn btn-primary">
+                            <i class="fas fa-cogs"></i> Generate Intelligence
+                        </button>
+                        <button onclick="inspectIntelligence()" class="btn btn-inspect">
+                            <i class="fas fa-database"></i> Inspect Intelligence Data
+                        </button>
+                    </div>
                     <div id="intelligence-status" class="status-message"></div>
                 </div>
             </div>
@@ -153,9 +190,14 @@
                         </select>
                     </div>
                     
-                    <button onclick="buildKnowledgeTree()" class="btn btn-primary">
-                        <i class="fas fa-project-diagram"></i> Build Knowledge Tree
-                    </button>
+                    <div class="step-actions">
+                        <button onclick="buildKnowledgeTree()" class="btn btn-primary">
+                            <i class="fas fa-project-diagram"></i> Build Knowledge Tree
+                        </button>
+                        <button onclick="inspectKnowledgeTree()" class="btn btn-inspect">
+                            <i class="fas fa-database"></i> Inspect Knowledge Tree
+                        </button>
+                    </div>
                     <div id="tree-status" class="status-message"></div>
                     
                     <!-- Knowledge Tree Results -->
@@ -356,7 +398,62 @@
         </div>
     </div>
 
-    <script src="dashboard.js"></script>
+    <!-- Data Inspection Modal -->
+    <div id="inspection-modal" class="modal">
+        <div class="modal-content inspection-modal">
+            <div class="modal-header">
+                <h2 id="inspection-modal-title"><i class="fas fa-database"></i> Database Inspection</h2>
+                <button class="modal-close" onclick="closeInspectionModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="inspection-summary">
+                    <div class="summary-stats">
+                        <div class="stat-item">
+                            <div class="stat-number" id="inspection-count">0</div>
+                            <div class="stat-label" id="inspection-count-label">Items</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="inspection-user">-</div>
+                            <div class="stat-label">User</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="inspection-controls">
+                    <input type="text" id="inspection-search" placeholder="Search data..." class="search-input">
+                    <button onclick="exportInspectionData()" class="btn btn-small">
+                        <i class="fas fa-download"></i> Export JSON
+                    </button>
+                    <button id="load-more-btn" onclick="loadMoreInspectionData()" class="btn btn-small" style="display: none;">
+                        <i class="fas fa-plus"></i> Load More
+                    </button>
+                </div>
+                
+                <div class="inspection-tabs">
+                    <button class="inspection-tab-btn active" onclick="showInspectionTab('table')">
+                        <i class="fas fa-table"></i> Table View
+                    </button>
+                    <button class="inspection-tab-btn" onclick="showInspectionTab('json')">
+                        <i class="fas fa-code"></i> JSON View
+                    </button>
+                </div>
+                
+                <div id="inspection-table-tab" class="inspection-tab-content active">
+                    <div id="inspection-table" class="inspection-table-container"></div>
+                </div>
+                
+                <div id="inspection-json-tab" class="inspection-tab-content">
+                    <pre id="inspection-json" class="inspection-json"></pre>
+                </div>
+                
+                <div id="inspection-loading" class="inspection-loading" style="display: none;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading data...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/dashboard.js"></script>
 </body>
 </html>
 

@@ -17,6 +17,7 @@ from flask_limiter.util import get_remote_address
 
 from api.auth_routes import auth_bp
 from api.routes import api_bp
+from routes.contacts import contacts_bp
 from middleware.auth_middleware import get_current_user, require_auth
 from storage.storage_manager import initialize_storage_manager
 from utils.logging import structured_logger as logger
@@ -53,6 +54,7 @@ def create_app(config=None):
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(contacts_bp)
     
     # Dashboard route - requires authentication
     @app.route('/dashboard')
@@ -60,11 +62,29 @@ def create_app(config=None):
     def dashboard():
         """Serve the dashboard - requires Google OAuth authentication"""
         user = get_current_user()
+        logger.info(f"🏠 Dashboard access attempt by user: {user}")
+        
         if not user or not user.get('authenticated'):
             # Redirect to login for real OAuth authentication
-            return redirect(url_for('auth.login'))
+            logger.warning("🚫 Dashboard access denied - redirecting to login")
+            return redirect('/login')
         
+        logger.info(f"✅ Dashboard access granted to {user.get('email')}")
         return send_from_directory('static', 'dashboard.html')
+    
+    # Login route - serves login page
+    @app.route('/login')
+    def login_page():
+        """Serve the login page or redirect to dashboard if already authenticated"""
+        # Check if user is already authenticated
+        user = get_current_user()
+        
+        if user and user.get('authenticated'):
+            logger.info(f"🔄 User {user.get('email')} already authenticated, redirecting to dashboard")
+            return redirect('/dashboard')
+        
+        logger.info("🔑 Login page requested - user not authenticated")
+        return send_from_directory('static', 'login.html')
     
     # Root route redirects to dashboard
     @app.route('/')
@@ -72,10 +92,59 @@ def create_app(config=None):
     def index():
         """Serve dashboard if authenticated, otherwise login"""
         user = get_current_user()
-        if not user or not user.get('authenticated'):
-            return redirect(url_for('auth.login'))
+        logger.info(f"🏠 Root access attempt by user: {user}")
         
+        if not user or not user.get('authenticated'):
+            logger.warning("🚫 Root access denied - redirecting to login")
+            return redirect('/login')
+        
+        logger.info(f"✅ Root access granted to {user.get('email')}")
         return send_from_directory('static', 'dashboard.html')
+    
+    # Debug route to check session status
+    @app.route('/debug/auth')
+    def debug_auth():
+        """Debug authentication status"""
+        if os.getenv('ENV') == 'production':
+            return jsonify({'error': 'Debug not available in production'}), 403
+        
+        user = get_current_user()
+        return jsonify({
+            'authenticated': bool(user and user.get('authenticated')),
+            'user': user,
+            'session': dict(session),
+            'session_keys': list(session.keys())
+        })
+    
+    # Test route to manually set authentication (DEVELOPMENT ONLY)
+    @app.route('/debug/set-auth')
+    def set_test_auth():
+        """Set test authentication for development"""
+        if os.getenv('ENV') == 'production':
+            return jsonify({'error': 'Not available in production'}), 403
+        
+        # Use the user's actual email for test authentication
+        user_email = 'Sandman@session-42.com'
+        
+        # Set test session data with real user email
+        session['user_id'] = user_email
+        session['user_email'] = user_email
+        session['authenticated'] = True
+        session['session_id'] = 'sandman_session_123'
+        session['oauth_credentials'] = {
+            'access_token': 'test_access_token_for_development_only',
+            'refresh_token': 'test_refresh_token',
+            'scopes': ['email', 'profile', 'gmail']
+        }
+        session.permanent = True
+        
+        logger.info(f"🧪 Test authentication set for development user: {user_email}")
+        return jsonify({
+            'success': True,
+            'message': 'Test authentication set',
+            'user_email': user_email,
+            'redirect_to': '/dashboard'
+        })
     
     # Health check route - NO AUTH REQUIRED
     @app.route('/api/health')

@@ -30,15 +30,24 @@ def get_current_user() -> Optional[Dict]:
     
     # Check if user_id is in session
     user_id = session.get('user_id')
-    if not user_id:
+    user_email = session.get('user_email')
+    authenticated = session.get('authenticated', False)
+    
+    logger.info(f"🔍 Auth check: user_id={user_id}, user_email={user_email}, authenticated={authenticated}")
+    
+    if not user_id or not authenticated:
+        logger.info("❌ No user_id or not authenticated")
         return None
     
     # Return minimal user info from session
-    return {
+    user_data = {
         'id': user_id,
-        'email': session.get('user_email'),
-        'authenticated': session.get('authenticated', False)
+        'email': user_email,
+        'authenticated': authenticated
     }
+    
+    logger.info(f"✅ Authenticated user: {user_email}")
+    return user_data
 
 async def load_user_from_token(token: str) -> Optional[Dict]:
     """
@@ -90,17 +99,23 @@ def require_auth(f: Callable) -> Callable:
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        logger.info(f"🔐 Auth check for {request.method} {request.path}")
+        
         # Allow certain routes without authentication
         allowed_paths = ['/api/health', '/api/system/health', '/static']
         
         # Check if this is an allowed path
         if any(request.path.startswith(path) for path in allowed_paths):
+            logger.info(f"✅ Allowed path: {request.path}")
             return f(*args, **kwargs)
         
         # Check if user is authenticated from session
         user = get_current_user()
         
         if not user or not user.get('authenticated', False):
+            logger.warning(f"❌ Authentication failed for {request.path}")
+            logger.info(f"Session data: {dict(session)}")
+            
             # Try to get from Authorization header for API
             auth_header = request.headers.get('Authorization')
             if auth_header and auth_header.startswith('Bearer '):
@@ -113,18 +128,23 @@ def require_auth(f: Callable) -> Callable:
                 if user:
                     # Store in request context for this request
                     g.user = user
+                    logger.info(f"✅ Token auth successful for {user.get('email')}")
                     return f(*args, **kwargs)
             
             # Not authenticated - API routes return 401, web routes redirect
             if request.path.startswith('/api/'):
+                logger.warning(f"🚫 API auth required: {request.path}")
                 return jsonify({
                     'error': 'Authentication required',
-                    'status': 'unauthorized'
+                    'status': 'unauthorized',
+                    'action': 'Please authenticate with Google OAuth'
                 }), 401
             else:
-                return redirect(url_for('auth.login'))
+                logger.warning(f"🔄 Redirecting to login from: {request.path}")
+                return redirect('/login')  # Direct redirect instead of url_for
         
         # User is authenticated
+        logger.info(f"✅ Authenticated access to {request.path} by {user.get('email')}")
         return f(*args, **kwargs)
     
     return decorated

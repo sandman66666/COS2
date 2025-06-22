@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 import numpy as np
+import json
 
 from storage.postgres_client import PostgresClient
 from storage.vector_client import VectorClient
@@ -119,6 +120,94 @@ class StorageManager:
         except Exception as e:
             logger.error(f"Create user error: {str(e)}")
             raise
+    
+    async def get_user_by_email(self, email: str) -> Optional[Dict]:
+        """Get user by email address"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Try cache first
+                try:
+                    cached_user = await self.cache.get_user_data_by_key(f"user_email:{email}")
+                    if cached_user:
+                        return cached_user
+                except Exception as cache_error:
+                    logger.warning(f"Cache lookup failed (attempt {attempt + 1}): {cache_error}")
+                
+                # Ensure PostgreSQL connection is healthy
+                if not await self.postgres.health_check():
+                    logger.warning(f"PostgreSQL connection unhealthy, resetting pool (attempt {attempt + 1})")
+                    await self.postgres.reset_connection_pool()
+                    await asyncio.sleep(1)
+                
+                # Get from PostgreSQL - use pool's built-in acquire timeout
+                async with self.postgres.conn_pool.acquire() as conn:
+                    row = await asyncio.wait_for(conn.fetchrow("""
+                        SELECT id, email, google_id, created_at, updated_at
+                        FROM users WHERE email = $1
+                    """, email), timeout=15)
+                    
+                    if not row:
+                        return None
+                    
+                    user_data = {
+                        'id': row['id'],
+                        'email': row['email'],
+                        'google_id': row['google_id'],
+                        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                    }
+                    
+                    # Cache for future requests (best effort)
+                    try:
+                        await self.cache.cache_user_data_by_key(
+                            f"user_email:{email}", user_data
+                        )
+                    except Exception as cache_error:
+                        logger.warning(f"Failed to cache user data: {cache_error}")
+                    
+                    return user_data
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"Database timeout getting user by email (attempt {attempt + 1})")
+                if attempt < max_retries - 1:
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    logger.error(f"Failed to get user by email after {max_retries} attempts due to timeouts")
+                    return None
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Get user by email error (attempt {attempt + 1}): {error_msg}")
+                
+                # Check if this is a retryable error
+                if any(phrase in error_msg.lower() for phrase in [
+                    "another operation is in progress",
+                    "connection was closed",
+                    "event loop is closed",
+                    "pool is closed",
+                    "connection"
+                ]) and attempt < max_retries - 1:
+                    
+                    logger.warning(f"Retryable database error, resetting pool and retrying (attempt {attempt + 1})")
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    # Non-retryable error or max retries reached
+                    logger.error(f"Non-retryable error or max retries reached: {error_msg}")
+                    return None
+        
+        logger.error(f"Failed to get user by email after {max_retries} attempts")
+        return None
     
     # ===== CONTACT OPERATIONS =====
     
@@ -310,60 +399,115 @@ class StorageManager:
     
     # ===== KNOWLEDGE TREE OPERATIONS =====
     
-    async def store_knowledge_tree(self, user_id: int, tree_data: Dict) -> bool:
-        """Store knowledge tree structure in PostgreSQL"""
-        try:
-            # Store directly in PostgreSQL as JSONB
-            async with self.postgres.conn_pool.acquire() as conn:
-                # Check if tree exists
-                exists = await conn.fetchval("""
-                    SELECT EXISTS(
-                        SELECT 1 FROM knowledge_tree WHERE user_id = $1
+    async def store_knowledge_tree(self, user_id: int, tree_data: Dict, analysis_type: str = "default") -> bool:
+        """Store knowledge tree structure in PostgreSQL with analysis type"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Ensure PostgreSQL connection is healthy
+                if not await self.postgres.health_check():
+                    logger.warning(f"PostgreSQL connection unhealthy, resetting pool (attempt {attempt + 1})")
+                    await self.postgres.reset_connection_pool()
+                    await asyncio.sleep(1)
+                
+                # Store directly in PostgreSQL as JSONB - use pool's built-in timeout
+                async with self.postgres.conn_pool.acquire() as conn:
+                    # Check if tree exists for this analysis type
+                    exists = await asyncio.wait_for(conn.fetchval("""
+                        SELECT EXISTS(
+                            SELECT 1 FROM knowledge_tree 
+                            WHERE user_id = $1 AND analysis_type = $2
+                        )
+                    """, user_id, analysis_type), timeout=15)
+                    
+                    if exists:
+                        # Update existing tree
+                        await asyncio.wait_for(conn.execute("""
+                            UPDATE knowledge_tree
+                            SET tree_data = $1, updated_at = CURRENT_TIMESTAMP
+                            WHERE user_id = $2 AND analysis_type = $3
+                        """, json.dumps(tree_data), user_id, analysis_type), timeout=30)
+                    else:
+                        # Create new tree
+                        await asyncio.wait_for(conn.execute("""
+                            INSERT INTO knowledge_tree (user_id, tree_data, analysis_type)
+                            VALUES ($1, $2, $3)
+                        """, user_id, json.dumps(tree_data), analysis_type), timeout=30)
+                    
+                # Invalidate cache (best effort)
+                try:
+                    await self.cache.invalidate_user_data(user_id, f'knowledge_tree_{analysis_type}')
+                except Exception as cache_error:
+                    logger.warning(f"Failed to invalidate cache: {cache_error}")
+                
+                # Notify of update (best effort)
+                try:
+                    await self.cache.user_update(
+                        user_id, 
+                        'knowledge_tree_updated', 
+                        {'timestamp': tree_data.get('timestamp'), 'analysis_type': analysis_type}
                     )
-                """, user_id)
+                except Exception as cache_error:
+                    logger.warning(f"Failed to send cache update: {cache_error}")
                 
-                if exists:
-                    # Update existing tree
-                    await conn.execute("""
-                        UPDATE knowledge_tree
-                        SET tree_data = $1, updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = $2
-                    """, tree_data, user_id)
+                return True
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"Database timeout storing knowledge tree (attempt {attempt + 1})")
+                if attempt < max_retries - 1:
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
                 else:
-                    # Create new tree
-                    await conn.execute("""
-                        INSERT INTO knowledge_tree (user_id, tree_data)
-                        VALUES ($1, $2)
-                    """, user_id, tree_data)
+                    logger.error(f"Failed to store knowledge tree after {max_retries} attempts due to timeouts")
+                    return False
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Store knowledge tree error (attempt {attempt + 1}): {error_msg}")
                 
-            # Invalidate cache
-            await self.cache.invalidate_user_data(user_id, 'knowledge_tree')
-            
-            # Notify of update
-            await self.cache.user_update(
-                user_id, 
-                'knowledge_tree_updated', 
-                {'timestamp': tree_data.get('timestamp')}
-            )
-            
-            return True
-        except Exception as e:
-            logger.error(f"Store knowledge tree error: {str(e)}")
-            return False
+                # Check if this is a retryable error
+                if any(phrase in error_msg.lower() for phrase in [
+                    "another operation is in progress",
+                    "connection was closed",
+                    "event loop is closed",
+                    "pool is closed",
+                    "connection"
+                ]) and attempt < max_retries - 1:
+                    
+                    logger.warning(f"Retryable database error, resetting pool and retrying (attempt {attempt + 1})")
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    # Non-retryable error or max retries reached
+                    logger.error(f"Non-retryable error or max retries reached: {error_msg}")
+                    return False
+        
+        logger.error(f"Failed to store knowledge tree after {max_retries} attempts")
+        return False
     
-    async def get_knowledge_tree(self, user_id: int) -> Optional[Dict]:
-        """Get knowledge tree from storage"""
+    async def get_knowledge_tree(self, user_id: int, analysis_type: str = "default") -> Optional[Dict]:
+        """Get knowledge tree from storage by analysis type"""
         try:
             # Try cache first
-            cached_tree = await self.cache.get_user_data(user_id, 'knowledge_tree')
+            cache_key = f'knowledge_tree_{analysis_type}'
+            cached_tree = await self.cache.get_user_data(user_id, cache_key)
             if cached_tree:
                 return cached_tree
             
             # Get from PostgreSQL
             async with self.postgres.conn_pool.acquire() as conn:
                 row = await conn.fetchrow("""
-                    SELECT tree_data FROM knowledge_tree WHERE user_id = $1
-                """, user_id)
+                    SELECT tree_data FROM knowledge_tree 
+                    WHERE user_id = $1 AND analysis_type = $2
+                """, user_id, analysis_type)
                 
                 if not row:
                     return None
@@ -373,7 +517,7 @@ class StorageManager:
                 # Cache for future requests
                 if tree_data:
                     await self.cache.cache_user_data(
-                        user_id, 'knowledge_tree', tree_data
+                        user_id, cache_key, tree_data
                     )
                 
                 return tree_data
@@ -381,6 +525,182 @@ class StorageManager:
         except Exception as e:
             logger.error(f"Get knowledge tree error: {str(e)}")
             return None
+
+    async def get_latest_knowledge_tree(self, user_id: int) -> Optional[Dict]:
+        """Get the most recently updated knowledge tree for a user"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Ensure PostgreSQL connection is healthy
+                if not await self.postgres.health_check():
+                    logger.warning(f"PostgreSQL connection unhealthy, resetting pool (attempt {attempt + 1})")
+                    await self.postgres.reset_connection_pool()
+                    await asyncio.sleep(1)
+                
+                # Get from PostgreSQL - latest by updated_at - use pool's built-in timeout
+                async with self.postgres.conn_pool.acquire() as conn:
+                    row = await asyncio.wait_for(conn.fetchrow("""
+                        SELECT tree_data, analysis_type, updated_at 
+                        FROM knowledge_tree 
+                        WHERE user_id = $1 
+                        ORDER BY updated_at DESC 
+                        LIMIT 1
+                    """, user_id), timeout=15)
+                    
+                    if not row:
+                        return None
+                    
+                    tree_data = row['tree_data']
+                    
+                    # Add metadata about the retrieval
+                    if tree_data and isinstance(tree_data, dict):
+                        tree_data['_retrieval_metadata'] = {
+                            'analysis_type': row['analysis_type'],
+                            'last_updated': row['updated_at'].isoformat() if row['updated_at'] else None
+                        }
+                    
+                    return tree_data
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"Database timeout getting latest knowledge tree (attempt {attempt + 1})")
+                if attempt < max_retries - 1:
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    logger.error(f"Failed to get latest knowledge tree after {max_retries} attempts due to timeouts")
+                    return None
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Get latest knowledge tree error (attempt {attempt + 1}): {error_msg}")
+                
+                # Check if this is a retryable error
+                if any(phrase in error_msg.lower() for phrase in [
+                    "another operation is in progress",
+                    "connection was closed",
+                    "event loop is closed",
+                    "pool is closed",
+                    "connection"
+                ]) and attempt < max_retries - 1:
+                    
+                    logger.warning(f"Retryable database error, resetting pool and retrying (attempt {attempt + 1})")
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    # Non-retryable error or max retries reached
+                    logger.error(f"Non-retryable error or max retries reached: {error_msg}")
+                    return None
+        
+        logger.error(f"Failed to get latest knowledge tree after {max_retries} attempts")
+        return None
+    
+    async def get_emails_for_user(self, user_id: int, limit: int = 100, time_window_days: int = 30) -> List[Dict]:
+        """Get emails for a user with optional time window filtering"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Ensure PostgreSQL connection is healthy
+                if not await self.postgres.health_check():
+                    logger.warning(f"PostgreSQL connection unhealthy, resetting pool (attempt {attempt + 1})")
+                    await self.postgres.reset_connection_pool()
+                    await asyncio.sleep(1)
+                
+                # Calculate date filter for time window
+                from datetime import datetime, timedelta
+                cutoff_date = datetime.now() - timedelta(days=time_window_days)
+                
+                # Get emails from PostgreSQL using correct schema
+                async with self.postgres.conn_pool.acquire() as conn:
+                    rows = await asyncio.wait_for(conn.fetch("""
+                        SELECT id, gmail_id, content, metadata, created_at, updated_at
+                        FROM emails 
+                        WHERE user_id = $1 
+                        AND created_at >= $2
+                        ORDER BY created_at DESC 
+                        LIMIT $3
+                    """, user_id, cutoff_date, limit), timeout=30)
+                    
+                    emails = []
+                    for row in rows:
+                        try:
+                            # Handle metadata that might be dict or JSON string
+                            metadata = row['metadata']
+                            if isinstance(metadata, str):
+                                metadata = json.loads(metadata) if metadata else {}
+                            elif not isinstance(metadata, dict):
+                                metadata = {}
+                        except:
+                            metadata = {}
+                        
+                        # Convert to expected email format
+                        email_data = {
+                            'id': row['id'],
+                            'gmail_id': row['gmail_id'],
+                            'sender': metadata.get('from', ''),
+                            'recipients': metadata.get('to', []),
+                            'subject': metadata.get('subject', ''),
+                            'body_text': row['content'] or '',
+                            'email_date': row['created_at'].isoformat() if row['created_at'] else None,
+                            'thread_id': metadata.get('thread_id', ''),
+                            'content': row['content'] or '',
+                            'metadata': {
+                                'sender': metadata.get('from', ''),
+                                'subject': metadata.get('subject', ''),
+                                'date': row['created_at'].isoformat() if row['created_at'] else None
+                            }
+                        }
+                        emails.append(email_data)
+                    
+                    return emails
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"Database timeout getting emails for user (attempt {attempt + 1})")
+                if attempt < max_retries - 1:
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    logger.error(f"Failed to get emails for user after {max_retries} attempts due to timeouts")
+                    return []
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Get emails for user error (attempt {attempt + 1}): {error_msg}")
+                
+                # Check if this is a retryable error
+                if any(phrase in error_msg.lower() for phrase in [
+                    "another operation is in progress",
+                    "connection was closed",
+                    "event loop is closed",
+                    "pool is closed",
+                    "connection"
+                ]) and attempt < max_retries - 1:
+                    
+                    logger.warning(f"Retryable database error, resetting pool and retrying (attempt {attempt + 1})")
+                    try:
+                        await self.postgres.reset_connection_pool()
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    except:
+                        pass
+                else:
+                    # Non-retryable error or max retries reached
+                    logger.error(f"Non-retryable error or max retries reached: {error_msg}")
+                    return []
+        
+        logger.error(f"Failed to get emails for user after {max_retries} attempts")
+        return []
 
 
 # Global instance for easy access
@@ -397,3 +717,7 @@ async def get_storage_manager() -> StorageManager:
 async def initialize_storage_manager():
     """Initialize the global storage manager - alias for get_storage_manager"""
     return await get_storage_manager()
+
+# Create a simple instance that can be imported directly
+# This will need to be initialized before use
+storage_manager = StorageManager()
