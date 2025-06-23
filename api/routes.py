@@ -29,9 +29,10 @@ from utils.logging import structured_logger as logger
 from middleware.auth_middleware import require_auth, api_key_auth, rate_limit, get_current_user
 from storage.storage_manager import get_storage_manager
 from storage.postgres_client import PostgresClient
-from gmail.client import GmailClient
-from gmail.analyzer import SentEmailAnalyzer, analyze_user_contacts
-from intelligence.contact_enrichment_integration import enrich_contacts_batch
+from intelligence.b_data_collection.gmail.client import GmailClient
+from intelligence.b_data_collection.gmail.analyzer import SentEmailAnalyzer, analyze_user_contacts
+from intelligence.d_enrichment.contact_enrichment_integration import enrich_contacts_batch
+from intelligence.f_knowledge_integration.knowledge_tree_orchestrator import KnowledgeTreeOrchestrator
 
 # Create blueprint
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -398,6 +399,34 @@ async def update_user_settings():
         'user_id': user_id
     })
 
+@api_bp.route('/user-info', methods=['GET'])
+@async_route
+async def get_user_info():
+    """Get current user information"""
+    try:
+        user_email = get_current_user()
+        if not user_email:
+            return jsonify({
+                'error': 'User not authenticated',
+                'status': 'unauthorized'
+            }), 401
+            
+        return jsonify({
+            'status': 'success',
+            'user': {
+                'email': user_email,
+                'id': user_email,  # For now, using email as ID
+                'authenticated': True
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting user info: {e}")
+        return jsonify({
+            'error': 'Failed to get user info',
+            'status': 'error'
+        }), 500
+
 # === Gmail Integration Routes ===
 
 @api_bp.route('/emails/sync', methods=['POST'])
@@ -519,7 +548,7 @@ async def _sync_emails_internal():
             # Import storage components only in real mode
             from storage.storage_manager import get_storage_manager
             from google.oauth2.credentials import Credentials
-            from gmail.client import GmailClient
+            from intelligence.b_data_collection.gmail.client import GmailClient
             
             # Initialize storage manager for real sync
             storage_manager = await get_storage_manager()
@@ -1258,7 +1287,7 @@ async def get_knowledge_tree():
 @api_bp.route('/intelligence/build-knowledge-tree', methods=['POST'])
 @async_route
 async def build_advanced_knowledge_tree():
-    """Build advanced strategic intelligence knowledge tree with multi-agent analysis"""
+    """Build advanced strategic intelligence knowledge tree with Claude Content Consolidation"""
     try:
         # Get authenticated user using the auth middleware function
         from middleware.auth_middleware import get_current_user
@@ -1271,7 +1300,7 @@ async def build_advanced_knowledge_tree():
             }), 401
             
         user_email = current_user['email']
-        logger.info(f"🧠 Building Advanced Strategic Intelligence for {user_email}")
+        logger.info(f"🚀 Building Claude-Powered Content Intelligence for {user_email}")
         
         # Get actual user from database to get the proper user ID
         from storage.storage_manager import storage_manager
@@ -1284,135 +1313,115 @@ async def build_advanced_knowledge_tree():
         
         # Get request parameters
         data = request.get_json() or {}
-        time_window_days = int(data.get('time_window_days', 30))
-        iteration = int(data.get('iteration', 1))
-        analysis_depth = data.get('analysis_depth', 'multidimensional')
+        force_rebuild = data.get('force_rebuild', False)
         
-        logger.info(f"📊 Analysis parameters: time_window={time_window_days} days, iteration={iteration}, depth={analysis_depth}")
+        logger.info(f"📊 Build parameters: force_rebuild={force_rebuild}")
         
-        # Initialize Advanced Knowledge System
-        from intelligence.advanced_knowledge_system import AdvancedKnowledgeSystem
-        advanced_system = AdvancedKnowledgeSystem()
+        # Initialize new Knowledge Tree Orchestrator with Claude Content Consolidation
+        from intelligence.f_knowledge_integration.knowledge_tree_orchestrator import KnowledgeTreeOrchestrator
+        from config.settings import ANTHROPIC_API_KEY
         
-        # Get emails for analysis using the proper integer user ID
-        emails = await storage_manager.get_emails_for_user(
-            user_id=user['id'],  # Now this is the actual integer user ID
-            limit=1000,  # Analyze more emails for sophisticated analysis
-            time_window_days=time_window_days
+        orchestrator = KnowledgeTreeOrchestrator(ANTHROPIC_API_KEY)
+        
+        # Build complete knowledge tree using Claude content consolidation
+        result = await orchestrator.build_complete_knowledge_tree(
+            user_email=user_email,  # Fix parameter name to match new method signature
+            force_rebuild=force_rebuild
         )
         
-        if not emails:
+        if not result.get('success'):
             return jsonify({
                 'success': False,
-                'error': 'No emails found for analysis. Please ensure Gmail data is synced.'
-            }), 404
-        
-        # Get existing contacts with augmentation data
-        try:
-            # Get contacts from database with enrichment data
-            async with storage_manager.postgres.conn_pool.acquire() as conn:
-                contacts_rows = await conn.fetch("""
-                    SELECT email, name, trust_tier, frequency, domain, metadata, 
-                           created_at, updated_at
-                    FROM contacts 
-                    WHERE user_id = $1 
-                    ORDER BY trust_tier ASC, frequency DESC
-                """, user['id'])  # Use the proper integer user ID
-                
-                existing_contacts = []
-                for row in contacts_rows:
-                    try:
-                        metadata = json.loads(row['metadata']) if row['metadata'] else {}
-                    except:
-                        metadata = {}
-                    
-                    existing_contacts.append({
-                        'email': row['email'],
-                        'name': row['name'],
-                        'trust_tier': row['trust_tier'],
-                        'frequency': row['frequency'],
-                        'domain': row['domain'],
-                        'metadata': metadata,
-                        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                        'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
-                    })
-        except Exception as contact_error:
-            logger.warning(f"Failed to load contacts for augmentation: {contact_error}")
-            existing_contacts = []
-        
-        logger.info(f"📧 Retrieved {len(emails)} emails and {len(existing_contacts)} contacts for advanced analysis")
-        
-        # Build advanced knowledge tree with multi-agent analysis
-        knowledge_tree = await advanced_system.build_advanced_knowledge_tree(
-            user_id=user['id'],  # Use the proper integer user ID
-            emails=emails,
-            existing_contacts=existing_contacts,
-            iteration=iteration
-        )
-        
-        # Store the knowledge tree
-        success = await storage_manager.store_knowledge_tree(
-            user_id=user['id'],  # Use the proper integer user ID
-            tree_data=knowledge_tree,
-            analysis_type=f"advanced_strategic_intelligence_v2_iter_{iteration}"
-        )
-        
-        if not success:
-            return jsonify({
-                'success': False,
-                'error': 'Failed to store advanced knowledge tree'
+                'error': 'Failed to build knowledge tree',
+                'details': result
             }), 500
         
-        logger.info("✅ Advanced strategic intelligence knowledge tree built and stored successfully")
+        # Store the knowledge tree (already done in orchestrator, but maintain compatibility)
+        knowledge_tree = result['knowledge_tree']
         
-        # Prepare response with rich metadata
+        logger.info("✅ Claude-powered content intelligence knowledge tree built and stored successfully")
+        
+        # Prepare enhanced response with Claude content consolidation metadata
         response_data = {
             'success': True,
-            'message': f'Advanced Strategic Intelligence built successfully (Iteration {iteration})',
-            'tree_type': 'advanced_strategic_intelligence_v2',
-            'system_version': knowledge_tree.get('analysis_metadata', {}).get('system_version', 'v2.0'),
-            'iteration': iteration,
+            'message': 'Claude-Powered Content Intelligence built successfully',
+            'tree_type': 'claude_content_consolidation_v3',
+            'system_version': knowledge_tree.get('version', '3.0'),
+            'architecture': 'claude_content_consolidation',
             'analysis_summary': {
-                'emails_analyzed': len(emails),
-                'contacts_integrated': len(existing_contacts),
-                'enriched_contacts': knowledge_tree.get('augmentation_sources', {}).get('contact_enrichment_data', 0),
-                'web_sources': knowledge_tree.get('augmentation_sources', {}).get('web_sources_analyzed', 0),
-                'cross_references': knowledge_tree.get('augmentation_sources', {}).get('cross_references_found', 0),
-                'agents_executed': len([k for k in knowledge_tree.get('agent_analysis', {}).keys() if not knowledge_tree['agent_analysis'][k].get('error')])
+                'claude_processing': {
+                    'total_content_processed': result.get('processing_stats', {}).get('total_content_processed', 0),
+                    'claude_batches_used': result.get('processing_stats', {}).get('total_batches', 0),
+                    'chars_per_batch': result.get('claude_metadata', {}).get('max_chars_per_batch', 180000),
+                    'model_used': result.get('claude_metadata', {}).get('model_used', 'claude-3-5-sonnet')
+                },
+                'intelligence_extracted': {
+                    'topics_identified': result.get('processing_stats', {}).get('topics_identified', 0),
+                    'relationships_analyzed': result.get('processing_stats', {}).get('relationships_analyzed', 0),
+                    'business_domains': result.get('processing_stats', {}).get('business_domains', 0),
+                    'timeline_events': result.get('processing_stats', {}).get('timeline_events', 0),
+                    'content_sources': result.get('processing_stats', {}).get('content_sources', 0)
+                },
+                'content_breakdown': result.get('content_breakdown', {})
             },
             'intelligence_capabilities': [
-                'Multi-agent Claude 4 Opus analysis',
-                'Email content cross-referencing',
-                'Contact augmentation integration',
-                'Competitive intelligence via web search',
-                'Cross-domain synthesis',
-                'Predictive insights generation'
+                'Claude-powered content consolidation (any content type!)',
+                'Iterative batch processing for unlimited content volumes',
+                'Real relationship intelligence (ESTABLISHED/ATTEMPTED/ONGOING/DORMANT)',
+                'Multi-source content analysis (emails, documents, slack, tasks)',
+                'Business domain categorization with AI',
+                'Temporal timeline extraction across all content',
+                'Character-optimized Claude requests for cost efficiency'
             ],
-            'next_iteration_suggestions': knowledge_tree.get('analysis_metadata', {}).get('next_iteration_suggestions', []),
+            'key_improvements': [
+                'Handles unlimited content volumes from any source',
+                'Real Claude intelligence instead of regex algorithms',
+                'Content-agnostic architecture (future-proof)',
+                'Iterative tree building preserves context across batches',
+                'Cost-optimized with maximum Claude utilization',
+                'Accurate relationship assessment across all communication',
+                'Scalable for enterprise multi-source content'
+            ],
             'strategic_highlights': {
-                'cross_domain_connections': len(knowledge_tree.get('strategic_intelligence', {}).get('cross_domain_connections', [])),
-                'business_opportunities': len(knowledge_tree.get('strategic_intelligence', {}).get('business_opportunity_matrix', {}).get('opportunities', [])),
-                'predictive_insights': len(knowledge_tree.get('strategic_intelligence', {}).get('predictive_insights', [])),
-                'strategic_frameworks': len(knowledge_tree.get('strategic_intelligence', {}).get('strategic_frameworks', {}))
+                'contact_count': knowledge_tree.get('contact_count', 0),
+                'content_count': knowledge_tree.get('content_count', 0),
+                'established_relationships': len([e for e in knowledge_tree.get('entities', []) 
+                                                if e.get('relationship_status') in ['established', 'ongoing']]),
+                'attempted_relationships': len([e for e in knowledge_tree.get('entities', []) 
+                                              if e.get('relationship_status') == 'attempted']),
+                'business_domains': list(knowledge_tree.get('business_domains', {}).keys()),
+                'content_sources': list(knowledge_tree.get('content_sources', {}).keys()),
+                'analysis_depth': knowledge_tree.get('analysis_depth', 'claude_iterative_content_consolidation')
+            },
+            'cost_efficiency': {
+                'method': 'Accumulate maximum content per Claude request',
+                'batch_optimization': 'Character-based batching for optimal utilization',
+                'iterative_intelligence': 'Build tree progressively with context preservation',
+                'content_agnostic': 'Same efficient process for emails, documents, slack, tasks'
+            },
+            'extensibility': {
+                'current_sources': list(result.get('content_breakdown', {}).keys()),
+                'supported_types': result.get('claude_metadata', {}).get('content_types_supported', []),
+                'future_ready': 'Plug-and-play for new content sources'
             }
         }
         
         return jsonify(response_data)
         
     except Exception as e:
-        logger.error(f"Failed to build advanced knowledge tree: {e}")
+        logger.error(f"Failed to build Claude content knowledge tree: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
             'success': False,
-            'error': f'Advanced knowledge tree building failed: {str(e)}',
-            'system': 'advanced_strategic_intelligence_v2'
+            'error': f'Claude content knowledge tree building failed: {str(e)}',
+            'system': 'claude_content_consolidation_v3'
         }), 500
 
 @api_bp.route('/intelligence/iterate-knowledge-tree', methods=['POST'])
 @async_route
 async def iterate_knowledge_tree():
-    """Iterate and improve existing knowledge tree with new analysis"""
+    """Iterate and improve existing knowledge tree with Claude content consolidation"""
     try:
         # Get authenticated user using the auth middleware function
         from middleware.auth_middleware import get_current_user
@@ -1425,7 +1434,7 @@ async def iterate_knowledge_tree():
             }), 401
             
         user_email = current_user['email']
-        logger.info(f"🔄 Iterating Advanced Strategic Intelligence for {user_email}")
+        logger.info(f"🔄 Iterating Claude-Powered Content Intelligence for {user_email}")
         
         # Get actual user from database to get the proper user ID
         from storage.storage_manager import storage_manager
@@ -1436,57 +1445,79 @@ async def iterate_knowledge_tree():
                 'error': 'User not found in database'
             }), 404
         
-        # Get existing tree
-        existing_tree = await storage_manager.get_latest_knowledge_tree(user['id'])  # Use proper integer user ID
+        # Initialize Knowledge Tree Orchestrator
+        from intelligence.f_knowledge_integration.knowledge_tree_orchestrator import KnowledgeTreeOrchestrator
+        from config.settings import ANTHROPIC_API_KEY
         
-        if not existing_tree:
+        orchestrator = KnowledgeTreeOrchestrator(ANTHROPIC_API_KEY)
+        
+        # Check if we have existing knowledge tree
+        status = orchestrator.get_knowledge_tree_status(user_email)  # Pass email instead of numeric ID
+        
+        if not status.get('has_knowledge_tree'):
             return jsonify({
                 'success': False,
-                'error': 'No existing knowledge tree found. Please build initial tree first.'
+                'error': 'No existing knowledge tree found. Please build initial tree first.',
+                'suggestion': 'Call /intelligence/build-knowledge-tree first'
             }), 404
         
-        # Determine next iteration number
-        current_iteration = existing_tree.get('iteration', 1)
-        next_iteration = current_iteration + 1
+        logger.info(f"🔄 Iteration with Claude consolidation - existing tree found")
         
-        # Get request parameters
-        data = request.get_json() or {}
-        time_window_days = int(data.get('time_window_days', 30))
-        focus_area = data.get('focus_area', None)  # Allow focused iteration
+        # Use the orchestrator's iterate method (rebuilds with all emails for Claude)
+        result = await orchestrator.iterate_knowledge_tree(user_email)  # Pass email instead of numeric ID
         
-        logger.info(f"🔄 Iteration {next_iteration} parameters: time_window={time_window_days} days, focus={focus_area}")
+        if not result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': 'Failed to iterate knowledge tree',
+                'details': result
+            }), 500
         
-        # Call the main build function with iteration parameter
-        iteration_request = {
-            'time_window_days': time_window_days,
-            'iteration': next_iteration,
-            'analysis_depth': 'multidimensional',
-            'focus_area': focus_area
+        # Knowledge tree is already stored in orchestrator
+        knowledge_tree = result['knowledge_tree']
+        
+        logger.info("✅ Claude knowledge tree iteration completed successfully")
+        
+        # Prepare iteration response
+        response_data = {
+            'success': True,
+            'message': 'Knowledge tree iteration completed with Claude consolidation',
+            'tree_type': 'claude_iterative_consolidation_v3_iteration',
+            'system_version': knowledge_tree.get('version', '3.0'),
+            'architecture': 'claude_consolidation',
+            'iteration_summary': {
+                'processing_method': 'claude_consolidation_rebuild',
+                'optimization': 'iterative_batch_processing',
+                'intelligence_source': 'claude_analysis',
+                'context_preservation': 'enabled'
+            },
+            'analysis_summary': {
+                'contact_count': knowledge_tree.get('contact_count', 0),
+                'email_count': knowledge_tree.get('email_count', 0),
+                'established_relationships': len([e for e in knowledge_tree.get('entities', []) 
+                                                if e.get('relationship_status') in ['established', 'ongoing']]),
+                'attempted_relationships': len([e for e in knowledge_tree.get('entities', []) 
+                                              if e.get('relationship_status') == 'attempted']),
+                'topics_identified': result.get('processing_stats', {}).get('topics_identified', 0),
+                'claude_batches_used': result.get('processing_stats', {}).get('total_batches', 0)
+            },
+            'key_benefits': [
+                'Claude handles incremental analysis automatically',
+                'Iterative tree building preserves context across batches',
+                'Maximum email utilization per Claude request',
+                'Real intelligence extraction instead of algorithms',
+                'Accurate relationship status updates'
+            ]
         }
         
-        # Use the existing build function but with iteration context
-        from flask import g
-        g.iteration_context = {
-            'previous_tree': existing_tree,
-            'focus_area': focus_area
-        }
-        
-        # Forward to build_advanced_knowledge_tree with iteration parameters
-        from flask import request
-        original_json = request.get_json
-        request.get_json = lambda: iteration_request
-        
-        try:
-            result = await build_advanced_knowledge_tree()
-            return result
-        finally:
-            request.get_json = original_json
+        return jsonify(response_data)
             
     except Exception as e:
-        logger.error(f"Failed to iterate knowledge tree: {e}")
+        logger.error(f"Failed to iterate Claude knowledge tree: {e}")
         return jsonify({
             'success': False,
-            'error': f'Knowledge tree iteration failed: {str(e)}'
+            'error': f'Claude knowledge tree iteration failed: {str(e)}',
+            'system': 'claude_iterative_consolidation_v3'
         }), 500
 
 @api_bp.route('/inspect/knowledge-tree', methods=['GET'])
@@ -1727,7 +1758,7 @@ async def _enrich_contacts_internal():
     Internal function to enrich contacts with professional intelligence using Enhanced Multi-Source Enrichment
     """
     from flask import session
-    from intelligence.contact_enrichment_integration import enrich_contacts_batch
+    from intelligence.d_enrichment.contact_enrichment_integration import enrich_contacts_batch
     
     user_email = session.get('user_email')
     if not user_email:

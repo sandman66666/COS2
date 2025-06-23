@@ -1,18 +1,45 @@
 // User Authentication Functions
 async function loadUserInfo() {
     try {
-        const response = await fetch('/api/auth/status');
+        const response = await fetch('/api/user-info');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const result = await response.json();
         
-        if (result.authenticated && result.user) {
-            document.getElementById('user-email').textContent = result.user.email || 'Unknown User';
-        } else {
-            // User not authenticated, redirect to login
-            window.location.href = '/logout';
+        // Validate the response structure
+        if (!result || !result.user) {
+            throw new Error('Invalid response format: missing user data');
         }
+        
+        const userEmailElement = document.getElementById('user-email');
+        if (userEmailElement) {
+            userEmailElement.textContent = result.user.email || 'Unknown User';
+        }
+        
+        console.log('👤 User info loaded:', result.user.email);
+        return result.user;
+        
     } catch (error) {
         console.error('Error loading user info:', error);
-        document.getElementById('user-email').textContent = 'Error loading user';
+        
+        const userEmailElement = document.getElementById('user-email');
+        if (userEmailElement) {
+            // Check if we're in debug mode or if this is a known auth issue
+            if (error.message.includes('404') || error.message.includes('Authentication required')) {
+                userEmailElement.textContent = 'Authentication Required';
+            } else {
+                userEmailElement.textContent = 'Error loading user';
+            }
+        }
+        
+        // Return a default user object for graceful degradation
+        return {
+            email: 'Not authenticated',
+            authenticated: false
+        };
     }
 }
 
@@ -33,6 +60,35 @@ function logout() {
 document.addEventListener('DOMContentLoaded', function() {
     loadUserInfo();
 });
+
+// === AUTHENTICATION STATUS ===
+
+async function loadAuthStatus() {
+    try {
+        // This function checks if user is authenticated
+        // For now, just log that it was called since auth is handled server-side
+        console.log('🔐 Checking authentication status...');
+        
+        // Try to load user info to verify auth
+        const user = await loadUserInfo();
+        
+        if (user && user.authenticated !== false) {
+            console.log('✅ User authenticated:', user.email);
+        } else {
+            console.log('❌ User not authenticated or auth status unknown');
+        }
+        
+        return user;
+        
+    } catch (error) {
+        console.error('Auth status check failed:', error);
+        // Don't show error to user as this is called on page load
+        return {
+            email: 'Auth check failed',
+            authenticated: false
+        };
+    }
+}
 
 // CEO Strategic Intelligence Functions
 async function generateCEOIntelligenceBrief() {
@@ -480,6 +536,92 @@ function updateStatus(elementId, status, message) {
     }
     
     statusElement.innerHTML = `${icon} ${message}`;
+}
+
+// Global message display function for pipeline feedback
+function showMessage(message, type = 'info') {
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    
+    // Try to find status messages container
+    let statusContainer = document.getElementById('statusMessages');
+    if (!statusContainer) {
+        // Create a floating message container if none exists
+        statusContainer = document.createElement('div');
+        statusContainer.id = 'statusMessages';
+        statusContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            max-width: 400px;
+        `;
+        document.body.appendChild(statusContainer);
+    }
+    
+    // Create message element
+    const messageElement = document.createElement('div');
+    messageElement.style.cssText = `
+        padding: 12px 16px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        border-left: 4px solid;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        color: white;
+        font-weight: 500;
+        animation: slideIn 0.3s ease-out;
+    `;
+    
+    // Set colors based on type
+    switch (type) {
+        case 'success':
+            messageElement.style.backgroundColor = '#28a745';
+            messageElement.style.borderLeftColor = '#1e7e34';
+            break;
+        case 'error':
+            messageElement.style.backgroundColor = '#dc3545';
+            messageElement.style.borderLeftColor = '#c82333';
+            break;
+        case 'warning':
+            messageElement.style.backgroundColor = '#ffc107';
+            messageElement.style.borderLeftColor = '#e0a800';
+            messageElement.style.color = '#000';
+            break;
+        default: // 'info'
+            messageElement.style.backgroundColor = '#007bff';
+            messageElement.style.borderLeftColor = '#0056b3';
+    }
+    
+    messageElement.innerHTML = message;
+    statusContainer.appendChild(messageElement);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (messageElement.parentNode) {
+            messageElement.style.animation = 'slideOut 0.3s ease-in';
+            setTimeout(() => {
+                if (messageElement.parentNode) {
+                    messageElement.parentNode.removeChild(messageElement);
+                }
+            }, 300);
+        }
+    }, 5000);
+}
+
+// Add CSS animations for messages
+if (!document.getElementById('messageAnimations')) {
+    const style = document.createElement('style');
+    style.id = 'messageAnimations';
+    style.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+    `;
+    document.head.appendChild(style);
 }
 
 // Modal event handlers
@@ -2568,3 +2710,1940 @@ function showAdvancedKnowledgeResults(result) {
         }
     }
 }
+
+// === STRATEGIC INTELLIGENCE DASHBOARD ===
+// Full Pipeline Management with Progress Tracking and Tree Visualization
+
+let currentPipelineState = {
+    isRunning: false,
+    currentStep: 0,
+    totalSteps: 5,
+    stepResults: {},
+    finalKnowledgeTree: null
+};
+
+const PIPELINE_STEPS = [
+    { id: 'contacts', name: 'Extract Official Contacts', description: 'Analyzing 1 year of sent emails...' },
+    { id: 'emails', name: 'Collect Recent Communications', description: 'Gathering emails from contact network...' },
+    { id: 'augment', name: 'Augment Contact Intelligence', description: 'Enhancing contacts with Claude...' },
+    { id: 'tree', name: 'Build Knowledge Tree', description: 'Consolidating content with Claude...' },
+    { id: 'intelligence', name: 'Generate Strategic Intelligence', description: 'Running strategic analysis...' }
+];
+
+// === INITIALIZATION ===
+document.addEventListener('DOMContentLoaded', function() {
+    initializeDashboard();
+    loadAuthStatus();
+});
+
+async function initializeDashboard() {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+        <div class="dashboard-container">
+            <!-- Header -->
+            <div class="dashboard-header">
+                <h1>🧠 Strategic Intelligence Dashboard</h1>
+                <p>Claude-Powered Content Consolidation & Intelligence Analysis</p>
+            </div>
+
+            <!-- Configuration Panel -->
+            <div class="config-panel">
+                <div class="config-item">
+                    <label for="daysBack">📅 Content History Range (Days):</label>
+                    <input type="number" id="daysBack" value="30" min="1" max="365" />
+                    <span class="config-help">How far back to analyze emails and content</span>
+                </div>
+                
+                <div class="config-item">
+                    <label for="skipValidation">
+                        <input type="checkbox" id="skipValidation" />
+                        🚫 Skip Step Prerequisites Validation
+                    </label>
+                    <span class="config-help">Allow running any step independently without checking prerequisites</span>
+                </div>
+                
+                <div class="action-buttons">
+                    <button id="startPipeline" class="start-button" onclick="startFullPipeline()">
+                        🚀 Start Full Pipeline
+                    </button>
+                    
+                    <button id="flushButton" class="flush-button" onclick="flushDatabase()">
+                        🗑️ Flush Database
+                    </button>
+                    
+                    <button id="testModalButton" class="test-button" onclick="testModal()" style="
+                        background: #17a2b8;
+                        color: white;
+                        border: none;
+                        padding: 10px 20px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        margin-left: 10px;
+                    ">
+                        🧪 Test Modal
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step Controls Panel -->
+            <div class="step-controls-panel">
+                <div class="step-controls-header">
+                    <h3>📋 Individual Step Controls</h3>
+                    <p>Run specific steps independently or restart from any point. Smart validation will use existing data when available.</p>
+                </div>
+                
+                ${PIPELINE_STEPS.map((step, index) => `
+                    <div class="step-card">
+                        <div class="step-header">
+                            <h2>
+                                <span class="step-number">${index + 1}</span>
+                                ${getStepIcon(step.id)} ${step.name}
+                            </h2>
+                            <div id="step-control-status-${step.id}" class="step-control-status"></div>
+                        </div>
+                        <div class="step-content">
+                            <p>${step.description}</p>
+                            
+                            <!-- Individual Step Progress Bar -->
+                            <div class="step-progress-container" id="step-progress-${step.id}" style="display: none;">
+                                <div class="step-progress-bar">
+                                    <div id="step-progress-fill-${step.id}" class="step-progress-fill"></div>
+                                </div>
+                                <span id="step-progress-text-${step.id}" class="step-progress-text">0%</span>
+                            </div>
+                            
+                            <div class="step-actions">
+                                <button id="run-step-${step.id}" class="btn btn-primary" onclick="handleRunIndividualStep('${step.id}')">
+                                    ▶️ Run Step ${index + 1}
+                                </button>
+                                ${index > 0 ? `
+                                    <button id="start-from-${step.id}" class="start-from-step-button" onclick="startFromStep('${step.id}', ${index + 1})">
+                                        🚀 Start From Here
+                                    </button>
+                                ` : ''}
+                                <button id="inspect-results-${step.id}" class="btn btn-secondary btn-small" onclick="handleInspectStepResults('${step.id}')">
+                                    🔍 Inspect Results
+                                </button>
+                                <button id="view-results-${step.id}" class="btn btn-secondary btn-small" onclick="handleViewStepResults('${step.id}')">
+                                    📊 View Results
+                                </button>
+                            </div>
+                            <div class="step-prerequisites">
+                                <small><strong>Prerequisites:</strong> ${getStepPrerequisites(step.id)}</small>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+
+            <!-- Progress Section -->
+            <div id="progressSection" class="progress-section" style="display: none;">
+                <div class="progress-header">
+                    <h3>Pipeline Progress</h3>
+                    <button id="stopPipeline" onclick="stopPipeline()" class="stop-button">⏹️ Stop</button>
+                </div>
+                
+                <div class="progress-bar-container">
+                    <div id="progressBar" class="progress-bar">
+                        <div id="progressFill" class="progress-fill"></div>
+                    </div>
+                    <span id="progressText">0% Complete</span>
+                </div>
+
+                <div id="stepsList" class="steps-list"></div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <h3>📊 Pipeline Results</h3>
+                    <div class="results-actions">
+                        <button onclick="downloadAllResults()" class="download-button">📥 Download All JSON</button>
+                        <button onclick="resetPipeline()" class="reset-button">🔄 Run Again</button>
+                    </div>
+                </div>
+
+                <div id="resultsSummary" class="results-summary"></div>
+                
+                <!-- Knowledge Tree Visualization -->
+                <div id="treeVisualization" class="tree-visualization">
+                    <h4>🌳 Knowledge Tree Explorer</h4>
+                    <div id="treeContainer" class="tree-container"></div>
+                </div>
+
+                <!-- Content Details Modal -->
+                <div id="contentModal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <span class="modal-close" onclick="closeModal()">&times;</span>
+                        <div id="modalContent"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Run From Modal -->
+            <div id="runFromModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <span class="modal-close" onclick="closeRunFromModal()">&times;</span>
+                    <div id="runFromModalContent">
+                        <h3>🎯 Start Pipeline From Specific Step</h3>
+                        <p>Select the step you want to start from. All subsequent steps will run automatically.</p>
+                        <div class="run-from-options">
+                            ${PIPELINE_STEPS.map((step, index) => `
+                                <div class="run-from-option">
+                                    <input type="radio" id="runFrom-${step.id}" name="runFromStep" value="${step.id}">
+                                    <label for="runFrom-${step.id}">
+                                        <span class="option-number">${index + 1}</span>
+                                        <span class="option-name">${step.name}</span>
+                                        <span class="option-desc">${step.description}</span>
+                                    </label>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="run-from-actions">
+                            <button onclick="startFromSelectedStep()" class="start-from-button">🚀 Start From Selected Step</button>
+                            <button onclick="closeRunFromModal()" class="cancel-button">❌ Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Messages -->
+            <div id="statusMessages" class="status-messages"></div>
+            
+            <!-- Inspection Modal -->
+            <div id="inspection-modal" class="modal" style="display: none;">
+                <div class="modal-content inspection-modal">
+                    <div class="modal-header">
+                        <h2 id="inspection-modal-title">🔍 Data Inspection</h2>
+                        <span class="modal-close" onclick="closeInspectionModal()">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <!-- Loading State -->
+                        <div id="inspection-loading" class="inspection-loading" style="display: none;">
+                            <i class="fas fa-spinner fa-spin"></i> Loading data...
+                        </div>
+                        
+                        <!-- Summary Stats -->
+                        <div class="inspection-summary" style="display: none;">
+                            <div class="summary-stats">
+                                <div class="stat-item">
+                                    <div id="inspection-count" class="stat-number">0</div>
+                                    <div id="inspection-count-label" class="stat-label">Items</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div id="inspection-user" class="stat-number">-</div>
+                                    <div class="stat-label">User</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Controls -->
+                        <div class="inspection-controls" style="display: none;">
+                            <input type="text" id="inspection-search" class="search-input" placeholder="Search data...">
+                            <button id="load-more-btn" onclick="loadMoreInspectionData()" class="btn btn-primary btn-small" style="display: none;">
+                                <i class="fas fa-plus"></i> Load More
+                            </button>
+                            <button onclick="exportInspectionData()" class="btn btn-secondary btn-small">
+                                <i class="fas fa-download"></i> Export JSON
+                            </button>
+                        </div>
+                        
+                        <!-- Tabs -->
+                        <div class="inspection-tabs" style="display: none;">
+                            <button class="inspection-tab-btn active" onclick="showInspectionTab('table')">
+                                <i class="fas fa-table"></i> Table View
+                            </button>
+                            <button class="inspection-tab-btn" onclick="showInspectionTab('json')">
+                                <i class="fas fa-code"></i> Raw JSON
+                            </button>
+                        </div>
+                        
+                        <!-- Tab Contents -->
+                        <div id="inspection-table-tab" class="inspection-tab-content active">
+                            <div id="inspection-table" class="inspection-table-container">
+                                <!-- Table content will be generated here -->
+                            </div>
+                        </div>
+                        
+                        <div id="inspection-json-tab" class="inspection-tab-content">
+                            <pre id="inspection-json" class="inspection-json">
+                                <!-- JSON content will be displayed here -->
+                            </pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    console.log('🚀 Dashboard HTML generated, initializing...');
+    
+    // Initialize button states and check for existing data
+    setTimeout(async () => {
+        console.log('🔧 Initializing button states...');
+        updateStartFromButtonStates();
+        
+        // Check for existing data and enable view/inspect buttons accordingly
+        console.log('🔍 Checking for existing data...');
+        await checkAndEnableExistingDataButtons();
+        console.log('✅ Dashboard initialization complete');
+    }, 100);
+}
+
+// New function to check for existing data and enable buttons
+async function checkAndEnableExistingDataButtons() {
+    console.log('🔍 Checking for existing step data...');
+    
+    for (const step of PIPELINE_STEPS) {
+        try {
+            const hasData = await checkStepHasExistingData(step.id);
+            if (hasData) {
+                enableViewResultsButton(step.id, 'Has existing data from previous runs');
+            } else {
+                disableViewResultsButton(step.id, 'Run this step first to see results');
+            }
+        } catch (error) {
+            console.warn(`Error checking data for step ${step.id}:`, error);
+            disableViewResultsButton(step.id, 'Run this step first to see results');
+        }
+    }
+}
+
+// Check if a step has existing data in the database
+async function checkStepHasExistingData(stepId) {
+    try {
+        switch (stepId) {
+            case 'contacts':
+                const contactsResponse = await fetch('/api/contacts?limit=1');
+                const contactsData = await contactsResponse.json();
+                return contactsData.success && contactsData.total > 0;
+                
+            case 'emails':
+                const emailsResponse = await fetch('/api/inspect/emails?limit=1');
+                const emailsData = await emailsResponse.json();
+                return emailsData.success && emailsData.total_emails > 0;
+                
+            case 'augment':
+                const augmentResponse = await fetch('/api/contacts?limit=1');
+                const augmentData = await augmentResponse.json();
+                // Check if any contacts have enrichment data
+                return augmentData.success && augmentData.contacts?.some(c => c.has_augmentation);
+                
+            case 'tree':
+                const treeResponse = await fetch('/api/inspect/knowledge-tree');
+                const treeData = await treeResponse.json();
+                return treeData.success && treeData.knowledge_tree !== null;
+                
+            case 'intelligence':
+                // Intelligence is integrated in knowledge tree, so check for tree
+                const intelligenceResponse = await fetch('/api/inspect/knowledge-tree');
+                const intelligenceData = await intelligenceResponse.json();
+                return intelligenceData.success && intelligenceData.knowledge_tree !== null;
+                
+            default:
+                return false;
+        }
+    } catch (error) {
+        console.warn(`Error checking existing data for ${stepId}:`, error);
+        return false;
+    }
+}
+
+function enableViewResultsButton(stepId, title) {
+    const viewButton = document.getElementById(`view-results-${stepId}`);
+    const inspectButton = document.getElementById(`inspect-results-${stepId}`);
+    
+    if (viewButton) {
+        viewButton.disabled = false;
+        viewButton.title = title || 'View results from database';
+        viewButton.style.opacity = '1';
+    }
+    if (inspectButton) {
+        inspectButton.disabled = false;
+        inspectButton.title = title || 'Inspect results from database';
+        inspectButton.style.opacity = '1';
+    }
+}
+
+function disableViewResultsButton(stepId, title) {
+    const viewButton = document.getElementById(`view-results-${stepId}`);
+    const inspectButton = document.getElementById(`inspect-results-${stepId}`);
+    
+    if (viewButton) {
+        viewButton.disabled = true;
+        viewButton.title = title || 'No data available';
+        viewButton.style.opacity = '0.5';
+    }
+    if (inspectButton) {
+        inspectButton.disabled = true;
+        inspectButton.title = title || 'No data available';
+        inspectButton.style.opacity = '0.5';
+    }
+}
+
+async function downloadStepResult(stepId) {
+    let result = currentPipelineState.stepResults?.[stepId];
+    
+    // If no result in current session, try to fetch from database
+    if (!result) {
+        try {
+            result = await fetchStepResultsFromDatabase(stepId);
+        } catch (error) {
+            showMessage(`❌ Error loading results for download: ${error.message}`, 'error');
+            return;
+        }
+    }
+    
+    if (!result) {
+        showMessage(`❌ No results available for ${stepId}`, 'error');
+        return;
+    }
+    
+    const step = PIPELINE_STEPS.find(s => s.id === stepId);
+    const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    const dataSource = currentPipelineState.stepResults?.[stepId] ? 'session' : 'database';
+    
+    const downloadLink = document.createElement('a');
+    downloadLink.href = 'data:application/json,' + encodeURIComponent(JSON.stringify(result, null, 2));
+    downloadLink.download = `${stepId}_${step.name.replace(/\s+/g, '_')}_${dataSource}_${timestamp}.json`;
+    downloadLink.click();
+    
+    showMessage(`📥 Downloaded ${step.name} results`, 'success');
+}
+
+function validateStepPrerequisites(stepId) {
+    const results = currentPipelineState.stepResults || {};
+    
+    // Add option to skip validation for testing/development
+    const skipValidation = document.getElementById('skipValidation')?.checked || false;
+    if (skipValidation) {
+        return { valid: true, message: 'Validation skipped' };
+    }
+    
+    switch (stepId) {
+        case 'contacts':
+            // Always allowed - just needs Gmail OAuth
+            return { valid: true };
+            
+        case 'emails':
+            // Needs contacts to be extracted OR allow if user wants to start from here
+            if (!results.contacts) {
+                // Instead of blocking, show a warning but allow
+                return { 
+                    valid: true, 
+                    warning: true,
+                    message: 'Note: Starting without extracted contacts. This step will sync emails independently.' 
+                };
+            }
+            return { valid: true };
+            
+        case 'augment':
+            // Needs contacts extracted OR allow if user wants to start from here
+            if (!results.contacts) {
+                // Check if we have contacts in database from previous runs
+                return { 
+                    valid: true, 
+                    warning: true,
+                    message: 'Note: Starting without fresh contact extraction. Will use existing contacts from database.' 
+                };
+            }
+            return { valid: true };
+            
+        case 'tree':
+            // Allow starting from tree building even without fresh augmentation
+            return { 
+                valid: true, 
+                warning: !results.augment,
+                message: !results.augment ? 'Note: Building tree with existing data. For best results, run augmentation first.' : undefined
+            };
+            
+        case 'intelligence':
+            // Allow starting intelligence even without fresh tree building
+            return { 
+                valid: true, 
+                warning: !results.tree,
+                message: !results.tree ? 'Note: Using existing knowledge tree. For latest insights, rebuild tree first.' : undefined
+            };
+            
+        default:
+            return { valid: false, message: 'Unknown step' };
+    }
+}
+
+// Add new function to validate with database check
+async function validateStepPrerequisitesWithDatabase(stepId) {
+    const sessionResults = currentPipelineState.stepResults || {};
+    
+    // If we have results from current session, use the regular validation
+    if (sessionResults[getPreviousStepId(stepId)]) {
+        return validateStepPrerequisites(stepId);
+    }
+    
+    // Check database for existing data
+    try {
+        switch (stepId) {
+            case 'emails':
+                // Check if we have any contacts in database
+                const contactsResponse = await fetch('/api/contacts?limit=1');
+                const contactsData = await contactsResponse.json();
+                if (contactsData.total > 0) {
+                    return { valid: true, message: 'Using existing contacts from database' };
+                } else {
+                    return { 
+                        valid: true, 
+                        warning: true,
+                        message: 'No contacts found in database. This step will sync emails independently.' 
+                    };
+                }
+                
+            case 'augment':
+                // Check if we have contacts to augment
+                const augmentContactsResponse = await fetch('/api/contacts?limit=1');
+                const augmentContactsData = await augmentContactsResponse.json();
+                if (augmentContactsData.total > 0) {
+                    return { valid: true, message: 'Using existing contacts from database' };
+                } else {
+                    return { 
+                        valid: true, 
+                        warning: true,
+                        message: 'No contacts found. Run "Extract Contacts" first for best results.' 
+                    };
+                }
+                
+            case 'tree':
+                // Check if we have augmented contacts or any contacts
+                const treeContactsResponse = await fetch('/api/contacts?limit=1');
+                const treeContactsData = await treeContactsResponse.json();
+                if (treeContactsData.total > 0) {
+                    return { valid: true, message: 'Using existing contacts from database' };
+                } else {
+                    return { 
+                        valid: true, 
+                        warning: true,
+                        message: 'Limited data available. Run previous steps for richer knowledge tree.' 
+                    };
+                }
+                
+            case 'intelligence':
+                // Check if we have a knowledge tree
+                const treeResponse = await fetch('/api/inspect/knowledge-tree');
+                const treeData = await treeResponse.json();
+                if (treeData.success && treeData.knowledge_tree) {
+                    return { valid: true, message: 'Using existing knowledge tree from database' };
+                } else {
+                    return { 
+                        valid: true, 
+                        warning: true,
+                        message: 'No knowledge tree found. Build tree first for best results.' 
+                    };
+                }
+                
+            default:
+                return { valid: true };
+        }
+    } catch (error) {
+        console.warn('Database validation check failed:', error);
+        // If database check fails, allow the step but with warning
+        return { 
+            valid: true, 
+            warning: true,
+            message: 'Cannot verify prerequisites. Step will run with available data.' 
+        };
+    }
+}
+
+function getPreviousStepId(stepId) {
+    const stepOrder = ['contacts', 'emails', 'augment', 'tree', 'intelligence'];
+    const currentIndex = stepOrder.indexOf(stepId);
+    return currentIndex > 0 ? stepOrder[currentIndex - 1] : null;
+}
+
+function validateStepDependencies() {
+    const results = currentPipelineState.stepResults || {};
+    let validationReport = '';
+    let allValid = true;
+    
+    validationReport += '<h3>🔍 Step Dependencies Validation</h3>\n<div class="validation-report">\n';
+    
+    PIPELINE_STEPS.forEach(step => {
+        const validation = validateStepPrerequisites(step.id);
+        const status = validation.valid ? '✅' : '❌';
+        const statusClass = validation.valid ? 'valid' : 'invalid';
+        
+        validationReport += `
+            <div class="validation-item ${statusClass}">
+                <span class="validation-status">${status}</span>
+                <span class="validation-step">${step.name}</span>
+                <span class="validation-message">${validation.valid ? 'Ready to run' : validation.message}</span>
+            </div>
+        `;
+        
+        if (!validation.valid) allValid = false;
+    });
+    
+    validationReport += '</div>\n';
+    
+    if (allValid) {
+        validationReport += '<p class="validation-summary success">🎉 All dependencies satisfied! You can run any step.</p>';
+    } else {
+        validationReport += '<p class="validation-summary warning">⚠️ Some steps have unmet dependencies. Run prerequisite steps first.</p>';
+    }
+    
+    showModal(validationReport);
+}
+
+// === RUN FROM MODAL ===
+
+function showRunFromModal() {
+    const modal = document.getElementById('runFromModal');
+    modal.style.display = 'block';
+}
+
+function closeRunFromModal() {
+    const modal = document.getElementById('runFromModal');
+    modal.style.display = 'none';
+}
+
+async function startFromSelectedStep() {
+    const selectedRadio = document.querySelector('input[name="runFromStep"]:checked');
+    if (!selectedRadio) {
+        showMessage('Please select a step to start from', 'warning');
+        return;
+    }
+    
+    const startStepId = selectedRadio.value;
+    const startIndex = PIPELINE_STEPS.findIndex(s => s.id === startStepId);
+    
+    closeRunFromModal();
+    
+    if (currentPipelineState.isRunning) {
+        showMessage('Pipeline already running!', 'warning');
+        return;
+    }
+    
+    const daysBack = parseInt(document.getElementById('daysBack').value);
+    
+    // Reset state
+    currentPipelineState = {
+        isRunning: true,
+        currentStep: startIndex,
+        totalSteps: PIPELINE_STEPS.length,
+        stepResults: currentPipelineState.stepResults || {}, // Preserve existing results
+        finalKnowledgeTree: null,
+        daysBack: daysBack
+    };
+    
+    // Show progress section
+    document.getElementById('progressSection').style.display = 'block';
+    document.getElementById('resultsSection').style.display = 'none';
+    document.getElementById('startPipeline').disabled = true;
+    
+    updateProgressDisplay();
+    renderStepsList();
+    
+    showMessage(`🚀 Starting pipeline from step ${startIndex + 1}: ${PIPELINE_STEPS[startIndex].name}`, 'info');
+    
+    try {
+        // Run from selected step to end
+        for (let i = startIndex; i < PIPELINE_STEPS.length; i++) {
+            const step = PIPELINE_STEPS[i];
+            
+            switch (step.id) {
+                case 'contacts':
+                    await executeStep('contacts', async () => {
+                        const response = await fetch('/api/gmail/analyze-sent', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                lookback_days: 365,
+                                force_refresh: true 
+                            })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'emails':
+                    await executeStep('emails', async () => {
+                        const response = await fetch('/api/emails/sync', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ days: daysBack })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'augment':
+                    await executeStep('augment', async () => {
+                        const response = await fetch('/api/intelligence/enrich-contacts', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                sources: ['email_signatures', 'email_content', 'domain_intelligence'],
+                                limit: 100 
+                            })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'tree':
+                    await executeStep('tree', async () => {
+                        const response = await fetch('/api/intelligence/build-knowledge-tree', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ force_rebuild: true })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'intelligence':
+                    await executeStep('intelligence', async () => {
+                        return {
+                            success: true,
+                            message: 'Strategic intelligence integrated in knowledge tree',
+                            intelligence_ready: true
+                        };
+                    });
+                    break;
+            }
+        }
+        
+        await completePipeline();
+        
+    } catch (error) {
+        console.error('Pipeline failed:', error);
+        showMessage(`❌ Pipeline failed: ${error.message}`, 'error');
+        currentPipelineState.isRunning = false;
+        document.getElementById('startPipeline').disabled = false;
+    }
+}
+
+async function executeIndividualStep(stepId, stepFunction) {
+    const step = PIPELINE_STEPS.find(s => s.id === stepId);
+    showMessage(`⏳ ${step.description}`, 'info');
+    
+    const result = await stepFunction();
+    
+    if (!result.success && result.success !== undefined) {
+        throw new Error(result.error || 'Step failed');
+    }
+    
+    return result;
+}
+
+function updateStepControlStatus(stepId, status, message) {
+    const statusElement = document.getElementById(`step-control-status-${stepId}`);
+    if (!statusElement) return;
+    
+    const icons = {
+        'running': '🔄',
+        'completed': '✅',
+        'error': '❌',
+        'waiting': '⏳'
+    };
+    
+    statusElement.className = `step-control-status status-${status}`;
+    statusElement.innerHTML = `${icons[status] || '⏳'} ${message}`;
+}
+
+function showViewResultsButton(stepId) {
+    const viewButton = document.getElementById(`view-results-${stepId}`);
+    const inspectButton = document.getElementById(`inspect-results-${stepId}`);
+    if (viewButton) {
+        viewButton.disabled = false;
+        viewButton.title = 'View raw JSON results';
+    }
+    if (inspectButton) {
+        inspectButton.disabled = false;
+        inspectButton.title = 'Inspect formatted results';
+    }
+}
+
+async function viewStepResults(stepId) {
+    try {
+        console.log(`🔍 Loading results for step: ${stepId}`);
+        
+        let result = currentPipelineState.stepResults?.[stepId];
+        
+        // If no result in current session, try to fetch from database
+        if (!result) {
+            try {
+                showMessage('📊 Loading results from database...', 'info');
+                result = await fetchStepResultsFromDatabase(stepId);
+                
+                if (!result) {
+                    console.log(`❌ No results found for step: ${stepId}`);
+                    showModal(`
+                        <div class="no-results-message">
+                            <h3>📊 No Results Available</h3>
+                            <p>This step hasn't been run yet or has no stored results.</p>
+                            <p>Please run <strong>${PIPELINE_STEPS.find(s => s.id === stepId)?.name || stepId}</strong> first to see results.</p>
+                            <div class="results-actions">
+                                <button onclick="handleRunIndividualStep('${stepId}')" class="btn btn-primary" style="
+                                    padding: 10px 20px;
+                                    margin: 5px;
+                                    border: none;
+                                    border-radius: 5px;
+                                    background: #007bff;
+                                    color: white;
+                                    cursor: pointer;
+                                ">
+                                    ▶️ Run Step Now
+                                </button>
+                                <button onclick="closeModal()" class="btn btn-secondary" style="
+                                    padding: 10px 20px;
+                                    margin: 5px;
+                                    border: none;
+                                    border-radius: 5px;
+                                    background: #6c757d;
+                                    color: white;
+                                    cursor: pointer;
+                                ">
+                                    ❌ Close
+                                </button>
+                            </div>
+                        </div>
+                    `);
+                    return;
+                }
+            } catch (error) {
+                console.error(`❌ Error loading results for ${stepId}:`, error);
+                showMessage(`❌ Error loading results: ${error.message}`, 'error');
+                return;
+            }
+        }
+        
+        console.log(`✅ Results loaded for step: ${stepId}`, result);
+        
+        const step = PIPELINE_STEPS.find(s => s.id === stepId);
+        const dataSource = currentPipelineState.stepResults?.[stepId] ? 'Current Session' : 'Database';
+        
+        const content = `
+            <h3 style="margin-top: 0; color: #333;">${getStepIcon(stepId)} ${step.name} Results</h3>
+            <div class="step-results-content">
+                <div class="data-source-info" style="margin-bottom: 15px; text-align: center;">
+                    <span class="data-source-badge ${dataSource.toLowerCase().replace(' ', '-')}" style="
+                        display: inline-block;
+                        padding: 4px 12px;
+                        border-radius: 12px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        color: white;
+                        background: ${dataSource === 'Current Session' ? '#28a745' : '#007bff'};
+                    ">
+                        📊 ${dataSource}
+                    </span>
+                </div>
+                <div class="results-summary">
+                    <h4 style="color: #495057;">📊 Raw JSON Data</h4>
+                    <pre class="results-json" style="
+                        background: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 5px;
+                        border: 1px solid #e9ecef;
+                        overflow-x: auto;
+                        font-size: 12px;
+                        line-height: 1.4;
+                        max-height: 400px;
+                        overflow-y: auto;
+                    ">${JSON.stringify(result, null, 2)}</pre>
+                </div>
+                <div class="results-actions" style="margin-top: 20px; text-align: center;">
+                    <button onclick="handleDownloadStepResult('${stepId}')" class="download-button" style="
+                        padding: 10px 20px;
+                        margin: 5px;
+                        border: none;
+                        border-radius: 5px;
+                        background: #28a745;
+                        color: white;
+                        cursor: pointer;
+                    ">
+                        📥 Download JSON
+                    </button>
+                    <button onclick="closeModal()" class="btn btn-secondary" style="
+                        padding: 10px 20px;
+                        margin: 5px;
+                        border: none;
+                        border-radius: 5px;
+                        background: #6c757d;
+                        color: white;
+                        cursor: pointer;
+                    ">
+                        ❌ Close
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        console.log(`📄 Generated content for modal, length: ${content.length}`);
+        showModal(content);
+        
+    } catch (error) {
+        console.error(`❌ Critical error in viewStepResults for ${stepId}:`, error);
+        showMessage(`❌ Critical error viewing results: ${error.message}`, 'error');
+        
+        // Show a simple error modal
+        showModal(`
+            <div style="text-align: center; padding: 20px;">
+                <h3 style="color: #dc3545;">❌ Error Loading Results</h3>
+                <p>There was an error loading the results for this step.</p>
+                <p><strong>Error:</strong> ${error.message}</p>
+                <button onclick="closeModal()" style="
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    background: #6c757d;
+                    color: white;
+                    cursor: pointer;
+                ">Close</button>
+            </div>
+        `);
+    }
+}
+
+async function inspectStepResults(stepId) {
+    let result = currentPipelineState.stepResults?.[stepId];
+    
+    // If no result in current session, try to fetch from database
+    if (!result) {
+        try {
+            showMessage('🔍 Loading results from database...', 'info');
+            result = await fetchStepResultsFromDatabase(stepId);
+            
+            if (!result) {
+                showModal(`
+                    <div class="no-results-message">
+                        <h3>🔍 No Results Available</h3>
+                        <p>This step hasn't been run yet or has no stored results.</p>
+                        <p>Please run <strong>${PIPELINE_STEPS.find(s => s.id === stepId).name}</strong> first to see results.</p>
+                        <div class="results-actions">
+                            <button onclick="handleRunIndividualStep('${stepId}')" class="btn btn-primary">
+                                ▶️ Run Step Now
+                            </button>
+                            <button onclick="closeModal()" class="btn btn-secondary">
+                                ❌ Close
+                            </button>
+                        </div>
+                    </div>
+                `);
+                return;
+            }
+        } catch (error) {
+            showMessage(`❌ Error loading results: ${error.message}`, 'error');
+            return;
+        }
+    }
+    
+    const step = PIPELINE_STEPS.find(s => s.id === stepId);
+    const dataSource = currentPipelineState.stepResults?.[stepId] ? 'Current Session' : 'Database';
+    let formattedContent = '';
+    
+    // Format content based on step type
+    switch (stepId) {
+        case 'contacts':
+            formattedContent = formatContactsResults(result);
+            break;
+        case 'emails':
+            formattedContent = formatEmailsResults(result);
+            break;
+        case 'augment':
+            formattedContent = formatAugmentResults(result);
+            break;
+        case 'tree':
+            formattedContent = formatTreeResults(result);
+            break;
+        case 'intelligence':
+            formattedContent = formatIntelligenceResults(result);
+            break;
+        default:
+            formattedContent = `<pre class="results-json">${JSON.stringify(result, null, 2)}</pre>`;
+    }
+    
+    const content = `
+        <div class="step-results-modal">
+            <h3>${getStepIcon(stepId)} ${step.name} - Detailed Results</h3>
+            <div class="data-source-info">
+                <span class="data-source-badge ${dataSource.toLowerCase().replace(' ', '-')}">
+                    📊 ${dataSource}
+                </span>
+            </div>
+            <div class="results-tabs">
+                <button class="tab-btn active" onclick="showResultTab(event, 'formatted')">📊 Summary</button>
+                <button class="tab-btn" onclick="showResultTab(event, 'raw')">🔧 Raw Data</button>
+            </div>
+            
+            <div id="formatted-tab" class="tab-content active">
+                ${formattedContent}
+            </div>
+            
+            <div id="raw-tab" class="tab-content">
+                <div class="raw-results">
+                    <h4>Raw JSON Response</h4>
+                    <pre class="results-json">${JSON.stringify(result, null, 2)}</pre>
+                </div>
+            </div>
+            
+            <div class="results-actions">
+                <button onclick="handleDownloadStepResult('${stepId}')" class="btn btn-primary">
+                    📥 Download JSON
+                </button>
+                <button onclick="closeModal()" class="btn btn-secondary">
+                    ❌ Close
+                </button>
+            </div>
+        </div>
+        
+        <style>
+        .data-source-info {
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .data-source-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+        }
+        .data-source-badge.current-session {
+            background: #28a745;
+        }
+        .data-source-badge.database {
+            background: #007bff;
+        }
+        </style>
+    `;
+    
+    showModal(content);
+}
+
+// New function to fetch step results from database
+async function fetchStepResultsFromDatabase(stepId) {
+    try {
+        switch (stepId) {
+            case 'contacts':
+                const contactsResponse = await fetch('/api/contacts');
+                const contactsData = await contactsResponse.json();
+                if (contactsData.success && contactsData.total > 0) {
+                    return {
+                        success: true,
+                        message: `Found ${contactsData.total} contacts from database`,
+                        stats: {
+                            total_contacts: contactsData.total,
+                            trust_tier_1: contactsData.contacts?.filter(c => c.trust_tier === 'tier_1').length || 0,
+                            trust_tier_2: contactsData.contacts?.filter(c => c.trust_tier === 'tier_2').length || 0,
+                            domains_found: new Set(contactsData.contacts?.map(c => c.domain).filter(Boolean)).size || 0
+                        },
+                        contacts: contactsData.contacts,
+                        source: 'database'
+                    };
+                }
+                break;
+                
+            case 'emails':
+                const emailsResponse = await fetch('/api/inspect/emails?limit=100');
+                const emailsData = await emailsResponse.json();
+                if (emailsData.success && emailsData.total_emails > 0) {
+                    return {
+                        success: true,
+                        message: `Found ${emailsData.total_emails} emails from database`,
+                        stats: {
+                            processed: emailsData.displayed_emails,
+                            total_found: emailsData.total_emails,
+                            days_synced: 'Historical data',
+                            source: 'database'
+                        },
+                        emails: emailsData.emails,
+                        source: 'database'
+                    };
+                }
+                break;
+                
+            case 'augment':
+                const augmentResponse = await fetch('/api/contacts');
+                const augmentData = await augmentResponse.json();
+                if (augmentData.success) {
+                    const enrichedContacts = augmentData.contacts?.filter(c => c.has_augmentation) || [];
+                    if (enrichedContacts.length > 0) {
+                        return {
+                            success: true,
+                            message: `Found ${enrichedContacts.length} enriched contacts from database`,
+                            stats: {
+                                contacts_processed: augmentData.total,
+                                successfully_enriched: enrichedContacts.length,
+                                success_rate: enrichedContacts.length / Math.max(augmentData.total, 1),
+                                sources_used: ['email_signatures', 'email_content', 'domain_intelligence'].length
+                            },
+                            enriched_contacts: enrichedContacts,
+                            source: 'database'
+                        };
+                    }
+                }
+                break;
+                
+            case 'tree':
+                const treeResponse = await fetch('/api/inspect/knowledge-tree');
+                const treeData = await treeResponse.json();
+                if (treeData.success && treeData.knowledge_tree) {
+                    const tree = treeData.knowledge_tree;
+                    const metadata = tree.analysis_metadata || {};
+                    return {
+                        success: true,
+                        message: 'Knowledge tree loaded from database',
+                        knowledge_tree: tree,
+                        analysis_summary: {
+                            emails_analyzed: metadata.email_count || tree.email_count || 0,
+                            contacts_integrated: metadata.contact_count || tree.contact_count || 0,
+                            system_version: metadata.system_version || tree.version || 'v2.0',
+                            strategic_domains: Object.keys(tree.domain_hierarchy || {}).length
+                        },
+                        source: 'database'
+                    };
+                }
+                break;
+                
+            case 'intelligence':
+                // Intelligence is integrated in knowledge tree
+                const intelligenceResponse = await fetch('/api/inspect/knowledge-tree');
+                const intelligenceData = await intelligenceResponse.json();
+                if (intelligenceData.success && intelligenceData.knowledge_tree) {
+                    return {
+                        success: true,
+                        message: 'Strategic intelligence integrated in knowledge tree (loaded from database)',
+                        intelligence_ready: true,
+                        knowledge_tree: intelligenceData.knowledge_tree,
+                        source: 'database'
+                    };
+                }
+                break;
+        }
+        
+        return null; // No data found
+    } catch (error) {
+        console.error(`Error fetching ${stepId} results from database:`, error);
+        throw error;
+    }
+}
+
+// === INDIVIDUAL STEP PROGRESS BARS ===
+
+function showStepProgress(stepId) {
+    const progressContainer = document.getElementById(`step-progress-${stepId}`);
+    if (progressContainer) {
+        progressContainer.style.display = 'flex';
+    }
+}
+
+function hideStepProgress(stepId) {
+    const progressContainer = document.getElementById(`step-progress-${stepId}`);
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+}
+
+function updateStepProgress(stepId, progress) {
+    const progressFill = document.getElementById(`step-progress-fill-${stepId}`);
+    const progressText = document.getElementById(`step-progress-text-${stepId}`);
+    
+    if (progressFill && progressText) {
+        progressFill.style.width = `${progress}%`;
+        progressText.textContent = `${Math.round(progress)}%`;
+    }
+}
+
+// === START FROM HERE FUNCTIONALITY ===
+
+// === PROGRESS DISPLAY FUNCTIONS ===
+
+function updateProgressDisplay() {
+    if (!currentPipelineState.isRunning) {
+        return;
+    }
+    
+    const progressSection = document.getElementById('progressSection');
+    const progressBar = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    
+    if (progressSection && progressBar && progressText) {
+        const percentage = Math.round((currentPipelineState.currentStep / currentPipelineState.totalSteps) * 100);
+        
+        progressBar.style.width = `${percentage}%`;
+        progressText.textContent = `${percentage}% Complete`;
+        
+        console.log(`📊 Pipeline progress: ${percentage}% (step ${currentPipelineState.currentStep + 1}/${currentPipelineState.totalSteps})`);
+    }
+}
+
+function renderStepsList() {
+    const stepsList = document.getElementById('stepsList');
+    if (!stepsList) return;
+    
+    let stepsHTML = '';
+    
+    PIPELINE_STEPS.forEach((step, index) => {
+        const isActive = index === currentPipelineState.currentStep;
+        const isCompleted = index < currentPipelineState.currentStep;
+        const stepResult = currentPipelineState.stepResults?.[step.id];
+        
+        const statusClass = isActive ? 'active' : (isCompleted ? 'completed' : 'pending');
+        const statusIcon = isActive ? '🔄' : (isCompleted ? '✅' : '⏳');
+        
+        stepsHTML += `
+            <div class="step-item ${statusClass}">
+                <span class="step-icon">${statusIcon}</span>
+                <span class="step-name">${step.name}</span>
+                <span class="step-status">
+                    ${isActive ? 'Running...' : (isCompleted ? 'Completed' : 'Pending')}
+                </span>
+            </div>
+        `;
+    });
+    
+    stepsList.innerHTML = stepsHTML;
+}
+
+function updateStepStatus(stepId, status) {
+    // Update in-progress steps list
+    renderStepsList();
+    
+    // Also update individual step control status if available
+    updateStepControlStatus(stepId, status, getStatusMessage(status));
+    
+    console.log(`📋 Step ${stepId} status updated to: ${status}`);
+}
+
+function getStatusMessage(status) {
+    const messages = {
+        'running': 'Running...',
+        'completed': 'Completed successfully',
+        'error': 'Error occurred',
+        'waiting': 'Waiting to start'
+    };
+    return messages[status] || 'Unknown status';
+}
+
+async function startFromStep(stepId, stepNumber) {
+    // Check if anything is running
+    if (currentPipelineState.isRunning) {
+        showMessage('Another operation is already running!', 'warning');
+        return;
+    }
+    
+    // Use database-aware validation instead of strict session validation
+    const validationResult = await validateStepPrerequisitesWithDatabase(stepId);
+    if (!validationResult.valid) {
+        showMessage(`❌ Prerequisites not met: ${validationResult.message}`, 'error');
+        return;
+    }
+    
+    // Show warning if there are prerequisites issues but step is allowed
+    if (validationResult.warning) {
+        showMessage(`⚠️ ${validationResult.message}`, 'warning');
+    } else if (validationResult.message && !validationResult.warning) {
+        showMessage(`ℹ️ ${validationResult.message}`, 'info');
+    }
+    
+    const stepIndex = PIPELINE_STEPS.findIndex(s => s.id === stepId);
+    const daysBack = parseInt(document.getElementById('daysBack').value);
+    
+    // Reset state for pipeline starting from this step
+    currentPipelineState = {
+        isRunning: true,
+        currentStep: stepIndex,
+        totalSteps: PIPELINE_STEPS.length,
+        stepResults: currentPipelineState.stepResults || {}, // Preserve existing results
+        finalKnowledgeTree: null,
+        daysBack: daysBack
+    };
+    
+    // Disable all start from buttons
+    updateStartFromButtonStates();
+    
+    // Show progress section
+    document.getElementById('progressSection').style.display = 'block';
+    document.getElementById('resultsSection').style.display = 'none';
+    document.getElementById('startPipeline').disabled = true;
+    
+    updateProgressDisplay();
+    renderStepsList();
+    
+    showMessage(`🚀 Starting pipeline from step ${stepNumber}: ${PIPELINE_STEPS[stepIndex].name}`, 'info');
+    
+    try {
+        // Run from selected step to end
+        for (let i = stepIndex; i < PIPELINE_STEPS.length; i++) {
+            const step = PIPELINE_STEPS[i];
+            
+            switch (step.id) {
+                case 'contacts':
+                    await executeStep('contacts', async () => {
+                        const response = await fetch('/api/gmail/analyze-sent', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                lookback_days: 365,
+                                force_refresh: true 
+                            })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'emails':
+                    await executeStep('emails', async () => {
+                        const response = await fetch('/api/emails/sync', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ days: daysBack })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'augment':
+                    await executeStep('augment', async () => {
+                        const response = await fetch('/api/intelligence/enrich-contacts', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                sources: ['email_signatures', 'email_content', 'domain_intelligence'],
+                                limit: 100 
+                            })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'tree':
+                    await executeStep('tree', async () => {
+                        const response = await fetch('/api/intelligence/build-knowledge-tree', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ force_rebuild: true })
+                        });
+                        return await response.json();
+                    });
+                    break;
+                    
+                case 'intelligence':
+                    await executeStep('intelligence', async () => {
+                        return {
+                            success: true,
+                            message: 'Strategic intelligence integrated in knowledge tree',
+                            intelligence_ready: true
+                        };
+                    });
+                    break;
+            }
+        }
+        
+        await completePipeline();
+        
+    } catch (error) {
+        console.error('Pipeline failed:', error);
+        showMessage(`❌ Pipeline failed: ${error.message}`, 'error');
+        currentPipelineState.isRunning = false;
+        updateStartFromButtonStates();
+        document.getElementById('startPipeline').disabled = false;
+    }
+}
+
+function updateStartFromButtonStates() {
+    const isRunning = currentPipelineState.isRunning;
+    
+    PIPELINE_STEPS.forEach((step, index) => {
+        if (index > 0) { // Skip step 1 (contacts)
+            const button = document.getElementById(`start-from-${step.id}`);
+            if (button) {
+                button.disabled = isRunning;
+                
+                // Update button text based on state
+                if (isRunning) {
+                    button.innerHTML = '⏳ Pipeline Running...';
+                } else {
+                    button.innerHTML = '🚀 Start From Here';
+                }
+            }
+        }
+    });
+    
+    // Also update individual run buttons
+    PIPELINE_STEPS.forEach(step => {
+        const button = document.getElementById(`run-step-${step.id}`);
+        if (button) {
+            button.disabled = isRunning;
+            if (isRunning) {
+                button.innerHTML = '⏳ Running...';
+            } else {
+                const stepIndex = PIPELINE_STEPS.findIndex(s => s.id === step.id);
+                button.innerHTML = `▶️ Run Step ${stepIndex + 1}`;
+            }
+        }
+    });
+}
+
+// Update the existing executeStep function to include progress tracking
+async function executeStep(stepId, stepFunction) {
+    const stepIndex = PIPELINE_STEPS.findIndex(s => s.id === stepId);
+    currentPipelineState.currentStep = stepIndex;
+    
+    updateProgressDisplay();
+    updateStepStatus(stepId, 'running');
+    updateStepControlStatus(stepId, 'running', 'Running...');
+    showStepProgress(stepId);
+    updateStepProgress(stepId, 0);
+    
+    try {
+        showMessage(`⏳ ${PIPELINE_STEPS[stepIndex].description}`, 'info');
+        
+        // Simulate progress updates during execution
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            progress += Math.random() * 20;
+            if (progress >= 90) progress = 90; // Don't complete until actually done
+            updateStepProgress(stepId, progress);
+        }, 500);
+        
+        const result = await stepFunction();
+        
+        clearInterval(progressInterval);
+        updateStepProgress(stepId, 100);
+        
+        if (!result.success && result.success !== undefined) {
+            throw new Error(result.error || 'Step failed');
+        }
+        
+        // Store result
+        currentPipelineState.stepResults[stepId] = result;
+        
+        // Make JSON downloadable
+        createDownloadLink(stepId, result);
+        
+        updateStepStatus(stepId, 'completed');
+        updateStepControlStatus(stepId, 'completed', 'Completed successfully');
+        enableViewResultsButton(stepId, 'View current session results');
+        showMessage(`✅ ${PIPELINE_STEPS[stepIndex].name} completed`, 'success');
+        
+        // Small delay for UI feedback
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Hide progress after completion
+        setTimeout(() => hideStepProgress(stepId), 2000);
+        
+        // Refresh button states for all steps in case this step affects others
+        setTimeout(async () => {
+            await checkAndEnableExistingDataButtons();
+        }, 1000);
+        
+    } catch (error) {
+        updateStepStatus(stepId, 'error');
+        updateStepControlStatus(stepId, 'error', `Error: ${error.message}`);
+        hideStepProgress(stepId);
+        throw error;
+    }
+}
+
+// === INDIVIDUAL STEP CONTROLS ===
+
+function getStepIcon(stepId) {
+    const icons = {
+        'contacts': '👥',
+        'emails': '📧',
+        'augment': '🔍',
+        'tree': '🌳',
+        'intelligence': '🧠'
+    };
+    return icons[stepId] || '⚙️';
+}
+
+function getStepPrerequisites(stepId) {
+    const prerequisites = {
+        'contacts': 'Gmail OAuth connection',
+        'emails': 'Gmail OAuth + Contacts extracted',
+        'augment': 'Contacts + Recent emails',
+        'tree': 'Augmented contacts + Email data',
+        'intelligence': 'Complete knowledge tree'
+    };
+    return prerequisites[stepId] || 'None';
+}
+
+async function runIndividualStep(stepId) {
+    const daysBack = parseInt(document.getElementById('daysBack').value);
+    
+    // Check if another operation is running
+    if (currentPipelineState.isRunning) {
+        showMessage('Another operation is already running!', 'warning');
+        return;
+    }
+    
+    // Use database-aware validation instead of strict session validation
+    const validationResult = await validateStepPrerequisitesWithDatabase(stepId);
+    if (!validationResult.valid) {
+        showMessage(`❌ Prerequisites not met: ${validationResult.message}`, 'error');
+        return;
+    }
+    
+    // Show warning if there are prerequisites issues but step is allowed
+    if (validationResult.warning) {
+        showMessage(`⚠️ ${validationResult.message}`, 'warning');
+    } else if (validationResult.message && !validationResult.warning) {
+        showMessage(`ℹ️ ${validationResult.message}`, 'info');
+    }
+    
+    updateStepControlStatus(stepId, 'running', 'Running...');
+    showStepProgress(stepId);
+    updateStepProgress(stepId, 0);
+    
+    try {
+        let result;
+        
+        switch (stepId) {
+            case 'contacts':
+                result = await executeIndividualStep('contacts', async () => {
+                    const response = await fetch('/api/gmail/analyze-sent', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            lookback_days: 365,  // Always 1 year for contacts
+                            force_refresh: true 
+                        })
+                    });
+                    return await response.json();
+                });
+                break;
+                
+            case 'emails':
+                result = await executeIndividualStep('emails', async () => {
+                    const response = await fetch('/api/emails/sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ days: daysBack })
+                    });
+                    return await response.json();
+                });
+                break;
+                
+            case 'augment':
+                result = await executeIndividualStep('augment', async () => {
+                    const response = await fetch('/api/intelligence/enrich-contacts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            sources: ['email_signatures', 'email_content', 'domain_intelligence'],
+                            limit: 100 
+                        })
+                    });
+                    return await response.json();
+                });
+                break;
+                
+            case 'tree':
+                result = await executeIndividualStep('tree', async () => {
+                    const response = await fetch('/api/intelligence/build-knowledge-tree', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ force_rebuild: true })
+                    });
+                    return await response.json();
+                });
+                break;
+                
+            case 'intelligence':
+                result = await executeIndividualStep('intelligence', async () => {
+                    return {
+                        success: true,
+                        message: 'Strategic intelligence integrated in knowledge tree',
+                        intelligence_ready: true
+                    };
+                });
+                break;
+                
+            default:
+                throw new Error(`Unknown step: ${stepId}`);
+        }
+        
+        // Simulate progress completion
+        updateStepProgress(stepId, 100);
+        
+        // Store result
+        if (!currentPipelineState.stepResults) {
+            currentPipelineState.stepResults = {};
+        }
+        currentPipelineState.stepResults[stepId] = result;
+        
+        updateStepControlStatus(stepId, 'completed', 'Completed successfully');
+        enableViewResultsButton(stepId, 'View current session results');
+        
+        // Show success message with step name
+        const stepName = PIPELINE_STEPS.find(s => s.id === stepId)?.name || stepId;
+        showMessage(`✅ ${stepName} completed successfully!`, 'success');
+        
+        // Hide progress after completion
+        setTimeout(() => hideStepProgress(stepId), 2000);
+        
+    } catch (error) {
+        updateStepControlStatus(stepId, 'error', `Error: ${error.message}`);
+        hideStepProgress(stepId);
+        showMessage(`❌ Step failed: ${error.message}`, 'error');
+    }
+}
+
+function formatContactsResults(result) {
+    const stats = result.stats || {};
+    return `
+        <div class="formatted-results">
+            <div class="results-summary">
+                <h4>📊 Contact Extraction Summary</h4>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.total_contacts || 0}</span>
+                        <span class="stat-label">Total Contacts</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.emails_processed || 0}</span>
+                        <span class="stat-label">Emails Processed</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.domains_found || 0}</span>
+                        <span class="stat-label">Unique Domains</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.trust_tier_1 || 0}</span>
+                        <span class="stat-label">Tier 1 Contacts</span>
+                    </div>
+                </div>
+                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function formatEmailsResults(result) {
+    const stats = result.stats || {};
+    return `
+        <div class="formatted-results">
+            <div class="results-summary">
+                <h4>📧 Email Sync Summary</h4>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.processed || 0}</span>
+                        <span class="stat-label">Emails Synced</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.days_synced || 0}</span>
+                        <span class="stat-label">Days Range</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.new_emails || 0}</span>
+                        <span class="stat-label">New Emails</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.updated_emails || 0}</span>
+                        <span class="stat-label">Updated</span>
+                    </div>
+                </div>
+                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function formatAugmentResults(result) {
+    const stats = result.stats || {};
+    return `
+        <div class="formatted-results">
+            <div class="results-summary">
+                <h4>🔍 Contact Enrichment Summary</h4>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.contacts_processed || 0}</span>
+                        <span class="stat-label">Contacts Processed</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.successfully_enriched || 0}</span>
+                        <span class="stat-label">Successfully Enriched</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${stats.sources_used || 0}</span>
+                        <span class="stat-label">Data Sources Used</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${Math.round((stats.success_rate || 0) * 100)}%</span>
+                        <span class="stat-label">Success Rate</span>
+                    </div>
+                </div>
+                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function formatTreeResults(result) {
+    const tree = result.knowledge_tree || {};
+    const metadata = tree.analysis_metadata || {};
+    return `
+        <div class="formatted-results">
+            <div class="results-summary">
+                <h4>🌳 Knowledge Tree Summary</h4>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <span class="stat-number">${metadata.emails_analyzed || 0}</span>
+                        <span class="stat-label">Emails Analyzed</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${metadata.contacts_integrated || 0}</span>
+                        <span class="stat-label">Contacts Integrated</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${Object.keys(tree.domain_hierarchy || {}).length}</span>
+                        <span class="stat-label">Strategic Domains</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">${metadata.system_version || 'v2.0'}</span>
+                        <span class="stat-label">System Version</span>
+                    </div>
+                </div>
+                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function formatIntelligenceResults(result) {
+    return `
+        <div class="formatted-results">
+            <div class="results-summary">
+                <h4>🧠 Strategic Intelligence Summary</h4>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <span class="stat-number">✅</span>
+                        <span class="stat-label">Intelligence Ready</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">🔗</span>
+                        <span class="stat-label">Integrated</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">🎯</span>
+                        <span class="stat-label">Strategic</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">📊</span>
+                        <span class="stat-label">Analyzed</span>
+                    </div>
+                </div>
+                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function showResultTab(event, tabName) {
+    // Remove active class from all tabs
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    
+    // Add active class to clicked tab
+    event.target.classList.add('active');
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+}
+
+function showModal(content) {
+    // Remove any existing result modal first
+    const existingModal = document.getElementById('resultModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Create new modal
+    const modal = document.createElement('div');
+    modal.id = 'resultModal';
+    modal.className = 'modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        padding: 20px;
+        box-sizing: border-box;
+    `;
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        ">
+            <span class="modal-close" onclick="closeModal()" style="
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                font-size: 24px;
+                font-weight: bold;
+                cursor: pointer;
+                color: #666;
+                z-index: 1001;
+                background: white;
+                border-radius: 50%;
+                width: 30px;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px solid #ddd;
+            " onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='white'">&times;</span>
+            <div id="modalContent" style="margin-top: 20px;">
+                ${content}
+            </div>
+        </div>
+    `;
+    
+    // Add click outside to close
+    modal.onclick = function(event) {
+        if (event.target === modal) {
+            closeModal();
+        }
+    };
+    
+    // Prevent modal content clicks from closing modal
+    modal.querySelector('.modal-content').onclick = function(event) {
+        event.stopPropagation();
+    };
+    
+    document.body.appendChild(modal);
+    
+    // Ensure modal is visible
+    setTimeout(() => {
+        modal.style.display = 'flex';
+    }, 10);
+    
+    console.log('✅ Modal created and displayed');
+}
+
+function closeModal() {
+    const modal = document.getElementById('resultModal');
+    if (modal) {
+        modal.style.display = 'none';
+        // Remove modal after animation
+        setTimeout(() => {
+            if (modal.parentNode) {
+                modal.parentNode.removeChild(modal);
+            }
+        }, 100);
+        console.log('✅ Modal closed and removed');
+    }
+}
+
+// === FULL PIPELINE EXECUTION ===
+
+async function startFullPipeline() {
+    // Check if anything is running
+    if (currentPipelineState.isRunning) {
+        showMessage('Another operation is already running!', 'warning');
+        return;
+    }
+    
+    // Start from the first step (contacts)
+    await startFromStep('contacts', 1);
+}
+
+async function completePipeline() {
+    // Mark pipeline as completed
+    currentPipelineState.isRunning = false;
+    
+    // Re-enable all buttons
+    updateStartFromButtonStates();
+    document.getElementById('startPipeline').disabled = false;
+    
+    // Show completion message
+    showMessage('🎉 Intelligence pipeline completed successfully!', 'success');
+    
+    // Show results section
+    document.getElementById('resultsSection').style.display = 'block';
+    
+    console.log('✅ Pipeline completed successfully');
+}
+
+function createDownloadLink(stepId, result) {
+    // Create a downloadable JSON blob for the result
+    const dataBlob = new Blob([JSON.stringify(result, null, 2)], {
+        type: 'application/json'
+    });
+    
+    // Store the blob URL for download
+    if (!window.stepDownloadLinks) {
+        window.stepDownloadLinks = {};
+    }
+    
+    window.stepDownloadLinks[stepId] = URL.createObjectURL(dataBlob);
+    
+    console.log(`✅ Download link created for step ${stepId}`);
+}
+
+// Add a simple test function to verify modal functionality
+function testModal() {
+    showModal(`
+        <div style="text-align: center; padding: 20px;">
+            <h3 style="color: #28a745;">✅ Modal Test</h3>
+            <p>If you can see this modal and the close button works, the modal system is functioning correctly!</p>
+            <button onclick="closeModal()" style="
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                background: #007bff;
+                color: white;
+                cursor: pointer;
+            ">Close Test Modal</button>
+        </div>
+    `);
+    console.log('🧪 Test modal displayed');
+}
+
+// Enhanced button click handlers for step results
+function handleViewStepResults(stepId) {
+    console.log(`🖱️ View results clicked for step: ${stepId}`);
+    viewStepResults(stepId).catch(error => {
+        console.error(`❌ Error in handleViewStepResults:`, error);
+        showMessage(`❌ Error viewing results: ${error.message}`, 'error');
+    });
+}
+
+function handleInspectStepResults(stepId) {
+    console.log(`🖱️ Inspect results clicked for step: ${stepId}`);
+    inspectStepResults(stepId).catch(error => {
+        console.error(`❌ Error in handleInspectStepResults:`, error);
+        showMessage(`❌ Error inspecting results: ${error.message}`, 'error');
+    });
+}
+
+function handleRunIndividualStep(stepId) {
+    console.log(`🖱️ Run individual step clicked for step: ${stepId}`);
+    runIndividualStep(stepId).catch(error => {
+        console.error(`❌ Error in handleRunIndividualStep:`, error);
+        showMessage(`❌ Error running step: ${error.message}`, 'error');
+    });
+}
+
+function handleDownloadStepResult(stepId) {
+    console.log(`🖱️ Download result clicked for step: ${stepId}`);
+    downloadStepResult(stepId).catch(error => {
+        console.error(`❌ Error in handleDownloadStepResult:`, error);
+        showMessage(`❌ Error downloading result: ${error.message}`, 'error');
+    });
+}
+

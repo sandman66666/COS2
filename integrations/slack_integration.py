@@ -8,7 +8,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.webhook.async_client import AsyncWebhookClient
 
 from utils.logging import structured_logger as logger
-from intelligence.incremental_knowledge_system import IncrementalKnowledgeSystem, DataSource
+from intelligence.g_realtime_updates.incremental_knowledge_system import IncrementalKnowledgeSystem, DataSource
 from config.settings import SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
 
 class SlackKnowledgeIntegration:

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from auth.auth_manager import get_current_user
 from models.user import User
 from utils.logging import structured_logger as logger
-from intelligence.tactical_alerts_system import (
+from intelligence.g_realtime_updates.tactical_alerts_system import (
     get_tactical_alerts_system, TacticalAlert, AlertType, UrgencyLevel
 )
 

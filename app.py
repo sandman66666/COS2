@@ -17,7 +17,8 @@ from flask_limiter.util import get_remote_address
 
 from api.auth_routes import auth_bp
 from api.routes import api_bp
-from routes.contacts import contacts_bp
+from api.alerts_routes_flask import alerts_bp
+# from routes.contacts import contacts_bp  # Removed - module doesn't exist
 from middleware.auth_middleware import get_current_user, require_auth
 from storage.storage_manager import initialize_storage_manager
 from utils.logging import structured_logger as logger
@@ -54,7 +55,7 @@ def create_app(config=None):
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
-    app.register_blueprint(contacts_bp)
+    app.register_blueprint(alerts_bp)
     
     # Dashboard route - requires authentication
     @app.route('/dashboard')

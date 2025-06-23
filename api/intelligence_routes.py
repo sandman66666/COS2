@@ -12,10 +12,10 @@ from pydantic import BaseModel
 from auth.auth_manager import get_current_user
 from models.user import User
 from utils.logging import structured_logger as logger
-from intelligence.claude_analysis import KnowledgeTreeBuilder
-from intelligence.knowledge_tree.multidimensional_matrix import MultidimensionalKnowledgeMatrix
+from intelligence.a_core.claude_analysis import KnowledgeTreeBuilder
+from intelligence.f_knowledge_integration.knowledge_tree.multidimensional_matrix import MultidimensionalKnowledgeMatrix
 from storage.storage_manager import get_storage_manager
-from intelligence.ceo_strategic_intelligence_system import CEOStrategicIntelligenceSystem
+from intelligence.e_strategic_analysis.ceo_strategic_intelligence_system import CEOStrategicIntelligenceSystem
 
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
 
@@ -661,7 +661,7 @@ async def analyze_competitive_landscape():
         user_id = 1
         
         # Initialize competitive landscape analyst directly
-        from intelligence.analysts.competitive_landscape_analyst import CompetitiveLandscapeAnalyst
+        from intelligence.e_strategic_analysis.analysts.competitive_landscape_analyst import CompetitiveLandscapeAnalyst
         
         landscape_analyst = CompetitiveLandscapeAnalyst(
             user_id=user_id,

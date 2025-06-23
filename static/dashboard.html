@@ -3,453 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contact Intelligence Dashboard - Session42</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <title>Strategic Intelligence Dashboard - Session42</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+        }
+        
+        #app {
+            width: 100%;
+            min-height: 100vh;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-size: 18px;
+            color: #666;
+        }
+        
+        .loading i {
+            margin-right: 10px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <header class="dashboard-header">
-            <div class="header-content">
-                <h1><i class="fas fa-brain"></i> Contact Intelligence Dashboard</h1>
-                <div class="header-controls">
-                    <div class="header-status">
-                        <span id="status-indicator" class="status-indicator">
-                            <i class="fas fa-circle"></i> <span id="status-text">Ready</span>
-                        </span>
-                    </div>
-                    <div class="user-section">
-                        <div class="user-info">
-                            <i class="fas fa-user-circle"></i>
-                            <span id="user-email">Loading...</span>
-                        </div>
-                        <button onclick="logout()" class="btn btn-logout" title="Sign out">
-                            <i class="fas fa-sign-out-alt"></i> Logout
-                        </button>
-                    </div>
-                    <button onclick="flushDatabase()" class="btn btn-flush" title="Clear all data and start fresh">
-                        <i class="fas fa-trash-alt"></i> Flush DB
-                    </button>
-                </div>
-            </div>
-        </header>
-
-        <div class="dashboard-grid">
-            <!-- CEO Strategic Intelligence Section -->
-            <div class="step-card ceo-intelligence">
-                <div class="step-header">
-                    <h2><i class="fas fa-crown"></i> CEO Strategic Intelligence</h2>
-                    <span class="step-number">0</span>
-                </div>
-                <div class="step-content">
-                    <p>Executive-level strategic intelligence and decision support for business growth.</p>
-                    
-                    <!-- CEO Intelligence Brief -->
-                    <div class="ceo-section">
-                        <h3><i class="fas fa-file-alt"></i> Intelligence Brief</h3>
-                        <div class="ceo-brief-controls">
-                            <input type="text" id="focus-area" placeholder="Focus area (optional)" class="input-field">
-                            <button onclick="generateCEOIntelligenceBrief()" class="btn btn-primary">
-                                <i class="fas fa-chart-line"></i> Generate CEO Brief
-                            </button>
-                        </div>
-                        <div id="ceo-brief-status" class="analysis-status"></div>
-                    </div>
-
-                    <!-- Competitive Landscape -->
-                    <div class="ceo-section">
-                        <h3><i class="fas fa-chess"></i> Competitive Landscape</h3>
-                        <button onclick="analyzeCompetitiveLandscape()" class="btn btn-secondary">
-                            <i class="fas fa-analytics"></i> Analyze Market Position
-                        </button>
-                        <div id="competitive-analysis-status" class="analysis-status"></div>
-                    </div>
-
-                    <!-- Network to Objectives Mapping -->
-                    <div class="ceo-section">
-                        <h3><i class="fas fa-sitemap"></i> Strategic Network</h3>
-                        <button onclick="mapNetworkToObjectives()" class="btn btn-secondary">
-                            <i class="fas fa-project-diagram"></i> Map Network Strategy
-                        </button>
-                        <div id="network-mapping-status" class="analysis-status"></div>
-                    </div>
-
-                    <!-- Decision Support -->
-                    <div class="ceo-section">
-                        <h3><i class="fas fa-balance-scale"></i> Decision Support</h3>
-                        <div class="decision-inputs">
-                            <input type="text" id="decision-area" placeholder="Decision area" class="input-field">
-                            <textarea id="decision-options" placeholder="Decision options (one per line)" class="textarea-field" rows="3"></textarea>
-                            <button onclick="generateDecisionSupport()" class="btn btn-secondary">
-                                <i class="fas fa-lightbulb"></i> Generate Decision Analysis
-                            </button>
-                        </div>
-                        <div id="decision-support-status" class="analysis-status"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 1: Gmail Integration (existing) -->
-            <div class="step-card">
-                <div class="step-header">
-                    <h2><i class="fas fa-envelope"></i> Gmail Integration</h2>
-                    <span class="step-number">1</span>
-                </div>
-                <div class="step-content">
-                    <p>Connect your Gmail account to fetch email data for intelligence analysis.</p>
-                    <div class="step-actions">
-                        <button onclick="connectGmail()" class="btn btn-primary">
-                            <i class="fab fa-google"></i> Connect Gmail
-                        </button>
-                        <button onclick="syncEmails()" class="btn btn-secondary">
-                            <i class="fas fa-sync"></i> Fetch Emails
-                        </button>
-                        <button onclick="inspectEmails()" class="btn btn-inspect">
-                            <i class="fas fa-database"></i> Inspect Stored Emails
-                        </button>
-                    </div>
-                    <div id="gmail-status" class="status-message"></div>
-                </div>
-            </div>
-
-            <!-- Step 2: Contact Extraction (existing) -->
-            <div class="step-card">
-                <div class="step-header">
-                    <h2><i class="fas fa-users"></i> Contact Extraction</h2>
-                    <span class="step-number">2</span>
-                </div>
-                <div class="step-content">
-                    <p>Extract and analyze contacts from your email communications.</p>
-                    <div class="step-actions">
-                        <button onclick="extractContacts()" class="btn btn-primary">
-                            <i class="fas fa-user-plus"></i> Extract Contacts
-                        </button>
-                        <button onclick="inspectContacts()" class="btn btn-inspect">
-                            <i class="fas fa-database"></i> Inspect Stored Contacts
-                        </button>
-                    </div>
-                    <div id="extraction-status" class="status-message"></div>
-                </div>
-            </div>
-
-            <!-- Step 3: Contact Augmentation (existing) -->
-            <div class="step-card">
-                <div class="step-header">
-                    <h2><i class="fas fa-search-plus"></i> Contact Augmentation</h2>
-                    <span class="step-number">3</span>
-                </div>
-                <div class="step-content">
-                    <p>Enhance contact profiles with additional intelligence data.</p>
-                    <div class="step-actions">
-                        <button onclick="augmentContacts()" class="btn btn-primary">
-                            <i class="fas fa-magic"></i> Augment Contacts
-                        </button>
-                        <button onclick="inspectAugmentedContacts()" class="btn btn-inspect">
-                            <i class="fas fa-database"></i> Inspect Augmented Data
-                        </button>
-                    </div>
-                    <div id="augmentation-status" class="status-message"></div>
-                </div>
-            </div>
-
-            <!-- Step 4: Contact Intelligence (existing) -->
-            <div class="step-card">
-                <div class="step-header">
-                    <h2><i class="fas fa-brain"></i> Contact Intelligence</h2>
-                    <span class="step-number">4</span>
-                </div>
-                <div class="step-content">
-                    <p>Generate AI-powered intelligence insights for each contact.</p>
-                    <div class="step-actions">
-                        <button onclick="generateIntelligence()" class="btn btn-primary">
-                            <i class="fas fa-cogs"></i> Generate Intelligence
-                        </button>
-                        <button onclick="inspectIntelligence()" class="btn btn-inspect">
-                            <i class="fas fa-database"></i> Inspect Intelligence Data
-                        </button>
-                    </div>
-                    <div id="intelligence-status" class="status-message"></div>
-                </div>
-            </div>
-
-            <!-- Step 5: Knowledge Tree Building (enhanced) -->
-            <div class="step-card">
-                <div class="step-header">
-                    <h2><i class="fas fa-tree"></i> Knowledge Tree Building</h2>
-                    <span class="step-number">5</span>
-                </div>
-                <div class="step-content">
-                    <p>Build comprehensive knowledge structures and strategic insights from all collected intelligence.</p>
-                    
-                    <!-- Analysis Depth Selection -->
-                    <div class="analysis-depth-selection">
-                        <label for="analysis-depth">Analysis Depth:</label>
-                        <select id="analysis-depth" class="select-field">
-                            <option value="standard">Standard Analysis</option>
-                            <option value="multidimensional" selected>Multidimensional Strategic Analysis</option>
-                        </select>
-                    </div>
-                    
-                    <div class="step-actions">
-                        <button onclick="buildKnowledgeTree()" class="btn btn-primary">
-                            <i class="fas fa-project-diagram"></i> Build Knowledge Tree
-                        </button>
-                        <button onclick="inspectKnowledgeTree()" class="btn btn-inspect">
-                            <i class="fas fa-database"></i> Inspect Knowledge Tree
-                        </button>
-                    </div>
-                    <div id="tree-status" class="status-message"></div>
-                    
-                    <!-- Knowledge Tree Results -->
-                    <div id="knowledge-results" class="knowledge-results" style="display: none;">
-                        <!-- Enhanced Tab System -->
-                        <div class="tab-container">
-                            <div class="tab-buttons">
-                                <button class="tab-btn active" onclick="showTab('worldview')">
-                                    <i class="fas fa-globe"></i> Strategic Worldview
-                                </button>
-                                <button class="tab-btn" onclick="showTab('insights')">
-                                    <i class="fas fa-lightbulb"></i> Strategic Insights
-                                </button>
-                                <button class="tab-btn" onclick="showTab('hierarchy')">
-                                    <i class="fas fa-sitemap"></i> Knowledge Hierarchy
-                                </button>
-                                <button class="tab-btn" onclick="showTab('tree')">
-                                    <i class="fas fa-tree"></i> Interactive Tree
-                                </button>
-                                <button class="tab-btn" onclick="showTab('topics')">
-                                    <i class="fas fa-tags"></i> Key Topics
-                                </button>
-                                <button class="tab-btn" onclick="showTab('network')">
-                                    <i class="fas fa-network-wired"></i> Contact Network
-                                </button>
-                                <button class="tab-btn" onclick="showTab('raw')">
-                                    <i class="fas fa-code"></i> Raw Data
-                                </button>
-                            </div>
-                            
-                            <!-- Strategic Worldview Tab -->
-                            <div id="worldview-tab" class="tab-content active">
-                                <h3><i class="fas fa-globe"></i> Strategic Worldview Analysis</h3>
-                                <div class="worldview-grid">
-                                    <div class="worldview-section">
-                                        <h4><i class="fas fa-brain"></i> Core Philosophies</h4>
-                                        <div id="core-philosophies" class="philosophy-cards"></div>
-                                    </div>
-                                    <div class="worldview-section">
-                                        <h4><i class="fas fa-blueprint"></i> Mental Models & Frameworks</h4>
-                                        <div id="mental-models" class="model-cards"></div>
-                                    </div>
-                                    <div class="worldview-section">
-                                        <h4><i class="fas fa-chart-line"></i> Behavioral Patterns</h4>
-                                        <div id="behavioral-patterns" class="pattern-cards"></div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Strategic Insights Tab -->
-                            <div id="insights-tab" class="tab-content">
-                                <h3><i class="fas fa-lightbulb"></i> Strategic Insights & Recommendations</h3>
-                                <div class="insights-grid">
-                                    <div class="insight-section">
-                                        <h4><i class="fas fa-star"></i> Key Strategic Insights</h4>
-                                        <div id="key-insights" class="insight-cards"></div>
-                                    </div>
-                                    <div class="insight-section">
-                                        <h4><i class="fas fa-chart-pie"></i> Strategic Opportunities</h4>
-                                        <div id="strategic-opportunities" class="opportunity-cards"></div>
-                                    </div>
-                                    <div class="insight-section">
-                                        <h4><i class="fas fa-tasks"></i> Recommended Actions</h4>
-                                        <div id="recommended-actions" class="action-cards"></div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Knowledge Hierarchy Tab -->
-                            <div id="hierarchy-tab" class="tab-content">
-                                <h3><i class="fas fa-sitemap"></i> Knowledge Hierarchy</h3>
-                                <div class="hierarchy-controls">
-                                    <input type="text" id="hierarchy-search" placeholder="Search hierarchy..." class="search-input">
-                                    <button onclick="expandAllHierarchy()" class="btn btn-small">
-                                        <i class="fas fa-expand"></i> Expand All
-                                    </button>
-                                    <button onclick="collapseAllHierarchy()" class="btn btn-small">
-                                        <i class="fas fa-compress"></i> Collapse All
-                                    </button>
-                                </div>
-                                <div id="hierarchy-structure" class="hierarchy-tree"></div>
-                            </div>
-                            
-                            <!-- Interactive Tree Tab (existing) -->
-                            <div id="tree-tab" class="tab-content">
-                                <h3><i class="fas fa-tree"></i> Interactive Knowledge Tree</h3>
-                                <div id="tree-visualization" class="tree-visualization"></div>
-                            </div>
-                            
-                            <!-- Topics Tab (existing) -->
-                            <div id="topics-tab" class="tab-content">
-                                <h3><i class="fas fa-tags"></i> Key Topics & Themes</h3>
-                                <div id="topics-cloud" class="topics-cloud"></div>
-                            </div>
-                            
-                            <!-- Contact Network Tab (existing) -->
-                            <div id="network-tab" class="tab-content">
-                                <h3><i class="fas fa-network-wired"></i> Contact Network Analysis</h3>
-                                <div id="network-graph" class="network-graph"></div>
-                            </div>
-                            
-                            <!-- Raw Data Tab (existing) -->
-                            <div id="raw-tab" class="tab-content">
-                                <h3><i class="fas fa-code"></i> Raw Analysis Data</h3>
-                                <div id="raw-data" class="raw-data"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Contact List and Details (existing) -->
-            <div class="contacts-section">
-                <div class="contacts-header">
-                    <h2><i class="fas fa-address-book"></i> Contact Directory</h2>
-                    <div class="contacts-stats">
-                        <span id="total-contacts">0 contacts</span>
-                        <span id="augmented-contacts">0 augmented</span>
-                    </div>
-                </div>
-                
-                <div class="contacts-filters">
-                    <input type="text" id="contact-search" placeholder="Search contacts..." class="search-input">
-                    <select id="contact-filter" class="filter-select">
-                        <option value="all">All Contacts</option>
-                        <option value="augmented">Augmented Only</option>
-                        <option value="executives">Executives</option>
-                        <option value="recent">Recent Activity</option>
-                    </select>
-                </div>
-                
-                <div id="contacts-list" class="contacts-list"></div>
-            </div>
-        </div>
-
-        <!-- CEO Intelligence Results Modal -->
-        <div id="ceo-results-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2><i class="fas fa-crown"></i> CEO Strategic Intelligence Brief</h2>
-                    <button class="modal-close" onclick="closeCEOModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="ceo-brief-tabs">
-                        <div class="ceo-tab-buttons">
-                            <button class="ceo-tab-btn active" onclick="showCEOTab('executive-summary')">
-                                <i class="fas fa-chart-line"></i> Executive Summary
-                            </button>
-                            <button class="ceo-tab-btn" onclick="showCEOTab('opportunities')">
-                                <i class="fas fa-star"></i> Strategic Opportunities
-                            </button>
-                            <button class="ceo-tab-btn" onclick="showCEOTab('competitive')">
-                                <i class="fas fa-chess"></i> Competitive Position
-                            </button>
-                            <button class="ceo-tab-btn" onclick="showCEOTab('network')">
-                                <i class="fas fa-sitemap"></i> Network Intelligence
-                            </button>
-                            <button class="ceo-tab-btn" onclick="showCEOTab('risks')">
-                                <i class="fas fa-exclamation-triangle"></i> Risk Assessment
-                            </button>
-                            <button class="ceo-tab-btn" onclick="showCEOTab('recommendations')">
-                                <i class="fas fa-lightbulb"></i> Strategic Recommendations
-                            </button>
-                        </div>
-                        
-                        <div id="executive-summary-tab" class="ceo-tab-content active">
-                            <h3><i class="fas fa-chart-line"></i> Executive Summary</h3>
-                            <div id="executive-summary-content"></div>
-                        </div>
-                        
-                        <div id="opportunities-tab" class="ceo-tab-content">
-                            <h3><i class="fas fa-star"></i> Strategic Opportunities</h3>
-                            <div id="opportunities-content"></div>
-                        </div>
-                        
-                        <div id="competitive-tab" class="ceo-tab-content">
-                            <h3><i class="fas fa-chess"></i> Competitive Position</h3>
-                            <div id="competitive-content"></div>
-                        </div>
-                        
-                        <div id="network-tab-ceo" class="ceo-tab-content">
-                            <h3><i class="fas fa-sitemap"></i> Network Intelligence</h3>
-                            <div id="network-content"></div>
-                        </div>
-                        
-                        <div id="risks-tab" class="ceo-tab-content">
-                            <h3><i class="fas fa-exclamation-triangle"></i> Risk Assessment</h3>
-                            <div id="risks-content"></div>
-                        </div>
-                        
-                        <div id="recommendations-tab" class="ceo-tab-content">
-                            <h3><i class="fas fa-lightbulb"></i> Strategic Recommendations</h3>
-                            <div id="recommendations-content"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Data Inspection Modal -->
-    <div id="inspection-modal" class="modal">
-        <div class="modal-content inspection-modal">
-            <div class="modal-header">
-                <h2 id="inspection-modal-title"><i class="fas fa-database"></i> Database Inspection</h2>
-                <button class="modal-close" onclick="closeInspectionModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="inspection-summary">
-                    <div class="summary-stats">
-                        <div class="stat-item">
-                            <div class="stat-number" id="inspection-count">0</div>
-                            <div class="stat-label" id="inspection-count-label">Items</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-number" id="inspection-user">-</div>
-                            <div class="stat-label">User</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="inspection-controls">
-                    <input type="text" id="inspection-search" placeholder="Search data..." class="search-input">
-                    <button onclick="exportInspectionData()" class="btn btn-small">
-                        <i class="fas fa-download"></i> Export JSON
-                    </button>
-                    <button id="load-more-btn" onclick="loadMoreInspectionData()" class="btn btn-small" style="display: none;">
-                        <i class="fas fa-plus"></i> Load More
-                    </button>
-                </div>
-                
-                <div class="inspection-tabs">
-                    <button class="inspection-tab-btn active" onclick="showInspectionTab('table')">
-                        <i class="fas fa-table"></i> Table View
-                    </button>
-                    <button class="inspection-tab-btn" onclick="showInspectionTab('json')">
-                        <i class="fas fa-code"></i> JSON View
-                    </button>
-                </div>
-                
-                <div id="inspection-table-tab" class="inspection-tab-content active">
-                    <div id="inspection-table" class="inspection-table-container"></div>
-                </div>
-                
-                <div id="inspection-json-tab" class="inspection-tab-content">
-                    <pre id="inspection-json" class="inspection-json"></pre>
-                </div>
-                
-                <div id="inspection-loading" class="inspection-loading" style="display: none;">
-                    <i class="fas fa-spinner fa-spin"></i> Loading data...
-                </div>
-            </div>
+    <div id="app">
+        <div class="loading">
+            <i class="fas fa-spinner"></i>
+            Loading Strategic Intelligence Dashboard...
         </div>
     </div>
 
