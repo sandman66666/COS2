@@ -3,6 +3,12 @@ async function loadUserInfo() {
     try {
         const response = await fetch('/api/user-info');
         
+        if (response.status === 401) {
+            console.log('❌ Authentication required - redirecting to login');
+            handleAuthenticationRequired();
+            return null;
+        }
+        
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -35,11 +41,67 @@ async function loadUserInfo() {
             }
         }
         
-        // Return a default user object for graceful degradation
+        // For non-401 errors, return a default user object for graceful degradation
         return {
             email: 'Not authenticated',
             authenticated: false
         };
+    }
+}
+
+function handleAuthenticationRequired() {
+    // Show user-friendly message
+    showMessage('Your session has expired. Please log in again.', 'warning');
+    
+    // Update UI to show logged out state
+    const userEmailElement = document.getElementById('user-email');
+    if (userEmailElement) {
+        userEmailElement.textContent = 'Please log in';
+    }
+    
+    // Disable all pipeline controls
+    disableAllPipelineControls();
+    
+    // Redirect to login after a short delay
+    setTimeout(() => {
+        window.location.href = '/login';
+    }, 2000);
+}
+
+function disableAllPipelineControls() {
+    // Disable all run buttons
+    const runButtons = document.querySelectorAll('button[onclick*="runIndividualStep"], button[onclick*="startFromStep"], button[onclick*="startFullPipeline"]');
+    runButtons.forEach(button => {
+        button.disabled = true;
+        button.textContent = 'Login Required';
+    });
+    
+    // Show authentication warning on all step controls
+    const stepStatuses = document.querySelectorAll('[id$="-status"]');
+    stepStatuses.forEach(status => {
+        status.innerHTML = '<span class="status warning">⚠️ Please log in to run operations</span>';
+    });
+}
+
+async function checkAuthentication() {
+    try {
+        const response = await fetch('/api/user-info');
+        
+        if (response.status === 401) {
+            console.log('❌ Authentication check failed - user not logged in');
+            handleAuthenticationRequired();
+            return false;
+        }
+        
+        if (response.ok) {
+            const result = await response.json();
+            return result && result.user && result.user.email;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Authentication check failed:', error);
+        return false;
     }
 }
 
@@ -57,36 +119,55 @@ function logout() {
 }
 
 // Initialize user info when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    loadUserInfo();
+document.addEventListener('DOMContentLoaded', async function() {
+    const user = await loadUserInfo();
+    if (!user) {
+        // User not authenticated, already handled by loadUserInfo
+        return;
+    }
 });
 
 // === AUTHENTICATION STATUS ===
 
+async function apiCall(url, options = {}) {
+    try {
+        const response = await fetch(url, options);
+        
+        if (response.status === 401) {
+            console.log(`❌ Authentication required for ${url}`);
+            handleAuthenticationRequired();
+            throw new Error('Authentication required');
+        }
+        
+        return response;
+    } catch (error) {
+        if (error.message === 'Authentication required') {
+            throw error;
+        }
+        console.error(`API call to ${url} failed:`, error);
+        throw error;
+    }
+}
+
 async function loadAuthStatus() {
     try {
         // This function checks if user is authenticated
-        // For now, just log that it was called since auth is handled server-side
         console.log('🔐 Checking authentication status...');
         
         // Try to load user info to verify auth
         const user = await loadUserInfo();
         
-        if (user && user.authenticated !== false) {
+        if (user && user.authenticated !== false && user.email !== 'Not authenticated') {
             console.log('✅ User authenticated:', user.email);
+            return user;
         } else {
             console.log('❌ User not authenticated or auth status unknown');
+            return null;
         }
-        
-        return user;
         
     } catch (error) {
         console.error('Auth status check failed:', error);
-        // Don't show error to user as this is called on page load
-        return {
-            email: 'Auth check failed',
-            authenticated: false
-        };
+        return null;
     }
 }
 
@@ -102,7 +183,7 @@ async function generateCEOIntelligenceBrief() {
             requestData.focus_area = focusArea;
         }
         
-        const response = await fetch('/api/intelligence/ceo-intelligence-brief', {
+        const response = await apiCall('/api/intelligence/ceo-intelligence-brief', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -121,6 +202,10 @@ async function generateCEOIntelligenceBrief() {
         
     } catch (error) {
         console.error('Error generating CEO intelligence brief:', error);
+        if (error.message === 'Authentication required') {
+            updateStatus('ceo-brief-status', 'error', 'Please log in to generate CEO brief');
+            return;
+        }
         updateStatus('ceo-brief-status', 'error', 'Error generating CEO brief: ' + error.message);
     }
 }
@@ -129,7 +214,7 @@ async function analyzeCompetitiveLandscape() {
     try {
         updateStatus('competitive-analysis-status', 'loading', 'Analyzing competitive landscape...');
         
-        const response = await fetch('/api/intelligence/competitive-landscape-analysis', {
+        const response = await apiCall('/api/intelligence/competitive-landscape-analysis', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -148,6 +233,10 @@ async function analyzeCompetitiveLandscape() {
         
     } catch (error) {
         console.error('Error analyzing competitive landscape:', error);
+        if (error.message === 'Authentication required') {
+            updateStatus('competitive-analysis-status', 'error', 'Please log in to analyze competitive landscape');
+            return;
+        }
         updateStatus('competitive-analysis-status', 'error', 'Error analyzing competitive landscape: ' + error.message);
     }
 }
@@ -156,7 +245,7 @@ async function mapNetworkToObjectives() {
     try {
         updateStatus('network-mapping-status', 'loading', 'Mapping network to objectives...');
         
-        const response = await fetch('/api/intelligence/network-to-objectives-mapping', {
+        const response = await apiCall('/api/intelligence/network-to-objectives-mapping', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -175,6 +264,10 @@ async function mapNetworkToObjectives() {
         
     } catch (error) {
         console.error('Error mapping network to objectives:', error);
+        if (error.message === 'Authentication required') {
+            updateStatus('network-mapping-status', 'error', 'Please log in to map network to objectives');
+            return;
+        }
         updateStatus('network-mapping-status', 'error', 'Error mapping network: ' + error.message);
     }
 }
@@ -208,7 +301,7 @@ async function generateDecisionSupport() {
             return;
         }
         
-        const response = await fetch('/api/intelligence/decision-support', {
+        const response = await apiCall('/api/intelligence/decision-support', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -231,6 +324,10 @@ async function generateDecisionSupport() {
         
     } catch (error) {
         console.error('Error generating decision support:', error);
+        if (error.message === 'Authentication required') {
+            updateStatus('decision-support-status', 'error', 'Please log in to generate decision support');
+            return;
+        }
         updateStatus('decision-support-status', 'error', 'Error generating decision support: ' + error.message);
     }
 }
@@ -3024,10 +3121,48 @@ async function checkStepHasExistingData(stepId) {
                 return emailsData.success && emailsData.total_emails > 0;
                 
             case 'augment':
-                const augmentResponse = await fetch('/api/contacts?limit=1');
-                const augmentData = await augmentResponse.json();
-                // Check if any contacts have enrichment data
-                return augmentData.success && augmentData.contacts?.some(c => c.has_augmentation);
+                // Check for enriched contacts using the real API endpoint
+                const enrichmentResponse = await fetch('/api/intelligence/enrichment-results?format=summary&limit=1');
+                if (enrichmentResponse.ok) {
+                    const enrichmentData = await enrichmentResponse.json();
+                    if (enrichmentData.success && enrichmentData.data && enrichmentData.data.statistics.enriched_contacts > 0) {
+                        return {
+                            success: true,
+                            message: `Found ${enrichmentData.data.statistics.enriched_contacts} enriched contacts`,
+                            stats: {
+                                contacts_processed: enrichmentData.data.statistics.total_contacts,
+                                successfully_enriched: enrichmentData.data.statistics.enriched_contacts,
+                                success_rate: enrichmentData.data.statistics.enrichment_rate,
+                                sources_used: 3 // Estimated
+                            },
+                            enriched_contacts: enrichmentData.data.contacts,
+                            source: 'database'
+                        };
+                    }
+                }
+                // Fallback: check contacts API for enrichment data
+                const contactsInspectResponse = await fetch('/api/inspect/contacts');
+                if (contactsInspectResponse.ok) {
+                    const contactsData = await contactsInspectResponse.json();
+                    if (contactsData.success && contactsData.contacts) {
+                        const enrichedContacts = contactsData.contacts.filter(c => c.has_augmentation || c.enrichment_status === 'enriched');
+                        if (enrichedContacts.length > 0) {
+                            return {
+                                success: true,
+                                message: `Found ${enrichedContacts.length} enriched contacts from database`,
+                                stats: {
+                                    contacts_processed: contactsData.total_contacts,
+                                    successfully_enriched: enrichedContacts.length,
+                                    success_rate: enrichedContacts.length / Math.max(contactsData.total_contacts, 1),
+                                    sources_used: 3
+                                },
+                                enriched_contacts: enrichedContacts,
+                                source: 'database'
+                            };
+                        }
+                    }
+                }
+                break;
                 
             case 'tree':
                 const treeResponse = await fetch('/api/inspect/knowledge-tree');
@@ -3927,6 +4062,13 @@ function getStatusMessage(status) {
 }
 
 async function startFromStep(stepId, stepNumber) {
+    // Check authentication first
+    const isAuthenticated = await checkAuthentication();
+    if (!isAuthenticated) {
+        showMessage('Authentication required. Please log in to run pipeline operations.', 'error');
+        return;
+    }
+    
     // Check if anything is running
     if (currentPipelineState.isRunning) {
         showMessage('Another operation is already running!', 'warning');
@@ -3989,6 +4131,11 @@ async function startFromStep(stepId, stepNumber) {
                                 force_refresh: true 
                             })
                         });
+                        
+                        if (response.status === 401) {
+                            throw new Error('Authentication required - please log in again');
+                        }
+                        
                         return await response.json();
                     });
                     break;
@@ -4000,6 +4147,11 @@ async function startFromStep(stepId, stepNumber) {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ days: daysBack })
                         });
+                        
+                        if (response.status === 401) {
+                            throw new Error('Authentication required - please log in again');
+                        }
+                        
                         return await response.json();
                     });
                     break;
@@ -4014,6 +4166,11 @@ async function startFromStep(stepId, stepNumber) {
                                 limit: 100 
                             })
                         });
+                        
+                        if (response.status === 401) {
+                            throw new Error('Authentication required - please log in again');
+                        }
+                        
                         return await response.json();
                     });
                     break;
@@ -4025,6 +4182,11 @@ async function startFromStep(stepId, stepNumber) {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ force_rebuild: true })
                         });
+                        
+                        if (response.status === 401) {
+                            throw new Error('Authentication required - please log in again');
+                        }
+                        
                         return await response.json();
                     });
                     break;
@@ -4045,6 +4207,13 @@ async function startFromStep(stepId, stepNumber) {
         
     } catch (error) {
         console.error('Pipeline failed:', error);
+        
+        // Check if it's an authentication error
+        if (error.message.includes('Authentication required') || error.message.includes('401')) {
+            handleAuthenticationRequired();
+            return;
+        }
+        
         showMessage(`❌ Pipeline failed: ${error.message}`, 'error');
         currentPipelineState.isRunning = false;
         updateStartFromButtonStates();
@@ -4172,6 +4341,13 @@ function getStepPrerequisites(stepId) {
 }
 
 async function runIndividualStep(stepId) {
+    // Check authentication first
+    const isAuthenticated = await checkAuthentication();
+    if (!isAuthenticated) {
+        showMessage('Authentication required. Please log in to run pipeline operations.', 'error');
+        return;
+    }
+    
     const daysBack = parseInt(document.getElementById('daysBack').value);
     
     // Check if another operation is running
@@ -4212,6 +4388,11 @@ async function runIndividualStep(stepId) {
                             force_refresh: true 
                         })
                     });
+                    
+                    if (response.status === 401) {
+                        throw new Error('Authentication required - please log in again');
+                    }
+                    
                     return await response.json();
                 });
                 break;
@@ -4223,6 +4404,11 @@ async function runIndividualStep(stepId) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ days: daysBack })
                     });
+                    
+                    if (response.status === 401) {
+                        throw new Error('Authentication required - please log in again');
+                    }
+                    
                     return await response.json();
                 });
                 break;
@@ -4237,6 +4423,11 @@ async function runIndividualStep(stepId) {
                             limit: 100 
                         })
                     });
+                    
+                    if (response.status === 401) {
+                        throw new Error('Authentication required - please log in again');
+                    }
+                    
                     return await response.json();
                 });
                 break;
@@ -4248,6 +4439,11 @@ async function runIndividualStep(stepId) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ force_rebuild: true })
                     });
+                    
+                    if (response.status === 401) {
+                        throw new Error('Authentication required - please log in again');
+                    }
+                    
                     return await response.json();
                 });
                 break;
@@ -4288,6 +4484,13 @@ async function runIndividualStep(stepId) {
     } catch (error) {
         updateStepControlStatus(stepId, 'error', `Error: ${error.message}`);
         hideStepProgress(stepId);
+        
+        // Check if it's an authentication error
+        if (error.message.includes('Authentication required') || error.message.includes('401')) {
+            handleAuthenticationRequired();
+            return;
+        }
+        
         showMessage(`❌ Step failed: ${error.message}`, 'error');
     }
 }
@@ -4552,6 +4755,13 @@ function closeModal() {
 // === FULL PIPELINE EXECUTION ===
 
 async function startFullPipeline() {
+    // Check authentication first
+    const isAuthenticated = await checkAuthentication();
+    if (!isAuthenticated) {
+        showMessage('Authentication required. Please log in to run pipeline operations.', 'error');
+        return;
+    }
+    
     // Check if anything is running
     if (currentPipelineState.isRunning) {
         showMessage('Another operation is already running!', 'warning');

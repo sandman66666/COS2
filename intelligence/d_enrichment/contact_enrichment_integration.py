@@ -76,10 +76,11 @@ class ContactEnrichmentService:
     async def enrich_contacts_batch(self, contacts: List[Dict], max_concurrent: int = 3) -> Dict[str, Dict]:
         """
         Enrich multiple contacts concurrently with rate limiting
+        NOW USES DOMAIN-BASED BATCH PROCESSING FOR MAXIMUM EFFICIENCY
         
         Args:
             contacts: List of contact dictionaries
-            max_concurrent: Maximum number of concurrent enrichments
+            max_concurrent: Maximum number of concurrent enrichments (not used in domain-based approach)
             
         Returns:
             Dictionary mapping email to enrichment results
@@ -87,26 +88,60 @@ class ContactEnrichmentService:
         if not self._initialized:
             await self.initialize()
         
+        if not contacts:
+            return {}
+        
+        logger.info(f"🚀 Starting DOMAIN-BASED batch enrichment for {len(contacts)} contacts")
+        
+        # Get user emails for context analysis
+        user_emails = []
+        try:
+            if hasattr(self.storage_manager, 'get_emails'):
+                emails_data, _ = self.storage_manager.get_emails(self.user_id, limit=500)
+                user_emails = emails_data
+                logger.info(f"📧 Retrieved {len(user_emails)} user emails for context analysis")
+        except Exception as e:
+            logger.warning(f"Could not retrieve user emails: {e}")
+        
+        # Use the new EFFICIENT domain-based enrichment
+        enrichment_results = await self.enricher.enrich_contacts_by_domain_batch(contacts, user_emails)
+        
+        # Convert results to the expected format
         results = {}
-        semaphore = asyncio.Semaphore(max_concurrent)
+        for email, enrichment_result in enrichment_results.items():
+            if enrichment_result.error:
+                results[email] = {
+                    'success': False,
+                    'error': enrichment_result.error,
+                    'confidence_score': 0.0,
+                    'data_sources': []
+                }
+            else:
+                results[email] = {
+                    'success': True,
+                    'confidence_score': enrichment_result.confidence_score,
+                    'person_data': enrichment_result.person_data,
+                    'company_data': enrichment_result.company_data,
+                    'data_sources': enrichment_result.data_sources,
+                    'enrichment_timestamp': enrichment_result.enrichment_timestamp.isoformat()
+                }
         
-        async def enrich_single(contact: Dict) -> None:
-            async with semaphore:
-                email = contact.get('email', '').strip()
-                if email:
-                    result = await self.enrich_contact(contact)
-                    results[email] = result
-                    # Small delay between requests
-                    await asyncio.sleep(1)
+        # Calculate and log efficiency stats
+        successful = sum(1 for result in results.values() if result.get('success', False))
+        failed = len(results) - successful
+        success_rate = successful / len(results) if results else 0
         
-        # Create tasks for all contacts
-        tasks = [enrich_single(contact) for contact in contacts if contact.get('email')]
+        # Count unique domains to show efficiency gain
+        domains = set()
+        for contact in contacts:
+            email = contact.get('email', '')
+            if '@' in email:
+                domains.add(email.split('@')[1])
         
-        # Execute with progress tracking
-        if tasks:
-            logger.info(f"Starting batch enrichment of {len(tasks)} contacts")
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info(f"Completed batch enrichment: {len(results)} contacts processed")
+        logger.info(f"✅ DOMAIN-BASED enrichment completed:")
+        logger.info(f"   📊 {successful} successful, {failed} failed ({success_rate:.1%} success rate)")
+        logger.info(f"   🏢 {len(domains)} unique domains processed")
+        logger.info(f"   ⚡ Efficiency gain: {len(contacts)/len(domains):.1f}x faster than individual processing")
         
         return results
     

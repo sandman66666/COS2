@@ -807,4 +807,182 @@ Resolve any conflicts in the data and provide the most accurate synthesis.
     async def cleanup(self):
         """Clean up resources"""
         if self.session:
-            await self.session.close() 
+            await self.session.close()
+
+    async def enrich_contacts_by_domain_batch(self, contacts: List[Dict], user_emails: List[Dict] = None) -> Dict[str, EnhancedEnrichmentResult]:
+        """
+        Efficiently enrich contacts by grouping them by domain and doing domain intelligence once per domain
+        
+        Args:
+            contacts: List of contact dictionaries
+            user_emails: User's emails for content analysis
+            
+        Returns:
+            Dictionary mapping email to enrichment results
+        """
+        if not contacts:
+            return {}
+        
+        logger.info(f"🚀 Starting domain-based batch enrichment for {len(contacts)} contacts")
+        
+        # Group contacts by domain
+        domain_groups = {}
+        generic_contacts = []
+        
+        for contact in contacts:
+            email = contact.get('email', '').strip().lower()
+            if not email or '@' not in email:
+                continue
+                
+            domain = email.split('@')[1]
+            
+            if self._is_generic_domain(domain):
+                generic_contacts.append(contact)
+            else:
+                if domain not in domain_groups:
+                    domain_groups[domain] = []
+                domain_groups[domain].append(contact)
+        
+        logger.info(f"📊 Grouped into {len(domain_groups)} company domains + {len(generic_contacts)} generic contacts")
+        
+        # Process domain intelligence once per domain
+        domain_intelligence_cache = {}
+        
+        logger.info(f"🏢 Processing company intelligence for {len(domain_groups)} domains...")
+        for domain in domain_groups.keys():
+            logger.info(f"  📈 Analyzing domain: {domain}")
+            domain_data = await self._analyze_domain_intelligence(domain)
+            domain_intelligence_cache[domain] = domain_data
+        
+        # Now process contacts efficiently using cached domain data
+        results = {}
+        
+        # Process company contacts (use cached domain intelligence)
+        for domain, domain_contacts in domain_groups.items():
+            cached_domain_data = domain_intelligence_cache.get(domain, {})
+            logger.info(f"🔄 Processing {len(domain_contacts)} contacts from {domain} using cached domain intelligence")
+            
+            for contact in domain_contacts:
+                result = await self._enrich_contact_with_cached_domain(contact, cached_domain_data, user_emails or [])
+                results[contact.get('email', '').strip().lower()] = result
+        
+        # Process generic contacts individually (no domain intelligence to cache)
+        if generic_contacts:
+            logger.info(f"👤 Processing {len(generic_contacts)} contacts from generic domains individually")
+            for contact in generic_contacts:
+                result = await self.enrich_contact(contact, user_emails)
+                results[contact.get('email', '').strip().lower()] = result
+        
+        success_count = sum(1 for r in results.values() if r.confidence_score > 0)
+        logger.info(f"✅ Domain-based batch enrichment completed: {success_count}/{len(results)} successful")
+        
+        return results
+    
+    async def _enrich_contact_with_cached_domain(self, contact: Dict, cached_domain_data: Dict, user_emails: List[Dict]) -> EnhancedEnrichmentResult:
+        """
+        Enrich contact using pre-computed domain intelligence (much faster)
+        
+        Args:
+            contact: Contact data with email
+            cached_domain_data: Pre-computed domain intelligence
+            user_emails: User's emails for content analysis
+            
+        Returns:
+            Enhanced enrichment result
+        """
+        email = contact.get('email', '').strip().lower()
+        if not email:
+            return EnhancedEnrichmentResult(
+                email=email,
+                confidence_score=0.0,
+                person_data={},
+                company_data={},
+                data_sources=[],
+                enrichment_timestamp=datetime.utcnow(),
+                error="No email provided"
+            )
+        
+        logger.info(f"⚡ Fast enrichment for {email} using cached domain data")
+        
+        # Initialize data containers
+        person_data = {}
+        company_data = cached_domain_data.copy()  # Start with cached domain data
+        data_sources = []
+        
+        if cached_domain_data:
+            data_sources.append('domain_intelligence_cached')
+        
+        try:
+            # 1. EMAIL SIGNATURE ANALYSIS (Individual analysis)
+            signature_data = await self._analyze_email_signatures(email, user_emails or [])
+            if signature_data['person'] or signature_data['company']:
+                person_data.update(signature_data['person'])
+                # Merge company data carefully (don't overwrite cached domain data)
+                for key, value in signature_data['company'].items():
+                    if value and (key not in company_data or not company_data[key]):
+                        company_data[key] = value
+                data_sources.append('email_signatures')
+                logger.info(f"✅ Extracted data from email signatures for {email}")
+            
+            # 2. EMAIL CONTENT ANALYSIS (Individual analysis)
+            content_data = await self._analyze_email_content(email, user_emails or [])
+            if content_data['person'] or content_data['company']:
+                person_data.update(content_data['person'])
+                # Merge company data carefully
+                for key, value in content_data['company'].items():
+                    if value and (key not in company_data or not company_data[key]):
+                        company_data[key] = value
+                data_sources.append('email_content')
+                logger.info(f"✅ Extracted data from email content for {email}")
+            
+            # 3. SKIP DOMAIN INTELLIGENCE (already cached)
+            # This is the efficiency gain - we don't redo domain analysis!
+            
+            # 4. ENHANCED WEB SCRAPING (Only if we have partial data to verify)
+            if person_data.get('name') or company_data.get('name'):
+                domain = email.split('@')[1] if '@' in email else None
+                web_data = await self._enhanced_web_scraping(person_data, company_data, domain)
+                if web_data['person'] or web_data['company']:
+                    person_data.update(web_data['person'])
+                    # Merge company data carefully
+                    for key, value in web_data['company'].items():
+                        if value and (key not in company_data or not company_data[key]):
+                            company_data[key] = value
+                    data_sources.append('web_scraping')
+                    logger.info(f"✅ Enhanced with web scraping data for {email}")
+            
+            # 5. CLAUDE SYNTHESIS (Final processing)
+            if person_data or company_data:
+                synthesized_data = await self._claude_data_synthesis(
+                    email, person_data, company_data, data_sources
+                )
+                person_data = synthesized_data['person']
+                company_data = synthesized_data['company']
+                data_sources.append('claude_synthesis')
+            
+            # Calculate confidence score
+            confidence_score = self._calculate_confidence_score(person_data, company_data, data_sources)
+            
+            result = EnhancedEnrichmentResult(
+                email=email,
+                confidence_score=confidence_score,
+                person_data=person_data,
+                company_data=company_data,
+                data_sources=data_sources,
+                enrichment_timestamp=datetime.utcnow()
+            )
+            
+            logger.info(f"⚡ Fast enrichment completed for {email} - Confidence: {confidence_score:.1%}, Sources: {len(data_sources)}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Fast enrichment failed for {email}: {str(e)}")
+            return EnhancedEnrichmentResult(
+                email=email,
+                confidence_score=0.0,
+                person_data={},
+                company_data=cached_domain_data.copy(),  # At least return cached domain data
+                data_sources=data_sources,
+                enrichment_timestamp=datetime.utcnow(),
+                error=str(e)
+            ) 

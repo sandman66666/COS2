@@ -106,13 +106,26 @@ class KnowledgeTreeOrchestrator:
         """
         all_content = []
         
+        # Get user_id for database operations
+        user = await self.storage_manager.get_user_by_email(user_email)
+        if not user:
+            print(f"  ❌ User {user_email} not found")
+            return all_content
+        
+        user_id = user['id']  # Use numeric ID for database queries
+        
         # 1. Get emails (current primary source)
         print("📧 Collecting emails...")
-        emails = await self.storage_manager.get_emails_for_user(user_email)
-        if emails:
-            email_content = ClaudeContentConsolidator.from_emails(emails)
-            all_content.extend(email_content)
-            print(f"  ✅ Added {len(email_content)} emails")
+        try:
+            emails = await self.storage_manager.get_emails_for_user(user_id)  # FIXED: Use user_id instead of user_email
+            if emails:
+                email_content = ClaudeContentConsolidator.from_emails(emails)
+                all_content.extend(email_content)
+                print(f"  ✅ Added {len(email_content)} emails")
+            else:
+                print(f"  ⚠️ No emails found for user {user_email}")
+        except Exception as e:
+            print(f"  ❌ Error getting emails: {e}")
         
         # 2. Get documents (future - placeholder for now)
         print("📄 Collecting documents...")
