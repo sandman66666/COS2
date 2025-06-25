@@ -1,0 +1,60 @@
+{
+  "name": "Strategic Intelligence System",
+  "description": "AI-powered strategic intelligence system with Gmail integration, contact enrichment, and Claude-based analysis",
+  "repository": "https://github.com/sandman66666/COS2",
+  "logo": "",
+  "keywords": ["flask", "ai", "strategic-intelligence", "gmail", "claude", "postgresql"],
+  "image": "heroku/python",
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "addons": [
+    {
+      "plan": "heroku-postgresql:essential-0",
+      "options": {
+        "version": "15"
+      }
+    }
+  ],
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "env": {
+    "ENVIRONMENT": {
+      "description": "Application environment",
+      "value": "production"
+    },
+    "API_SECRET_KEY": {
+      "description": "Secret key for Flask sessions",
+      "generator": "secret"
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Anthropic Claude API key for AI analysis",
+      "required": true
+    },
+    "GOOGLE_CLIENT_ID": {
+      "description": "Google OAuth Client ID for Gmail integration",
+      "required": true
+    },
+    "GOOGLE_CLIENT_SECRET": {
+      "description": "Google OAuth Client Secret for Gmail integration",
+      "required": true
+    },
+    "HEROKU_APP_NAME": {
+      "description": "Name of your Heroku app (auto-configured by Heroku)",
+      "required": false
+    },
+    "LOG_LEVEL": {
+      "description": "Logging level",
+      "value": "INFO"
+    }
+  },
+  "scripts": {
+    "postdeploy": "python -c \"from storage.storage_manager_sync import initialize_storage_manager_sync; initialize_storage_manager_sync()\""
+  }
+} 
