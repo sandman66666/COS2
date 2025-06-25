@@ -21,7 +21,7 @@ The Strategic Intelligence System is a production-ready platform that combines G
    GOOGLE_REDIRECT_URI=http://localhost:8080/api/auth/callback
    
    # Claude 4 Opus API
-   ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+   ANTHROPIC_API_KEY=sk-ant-api03-[your-actual-key-replace-this-placeholder]
    
    # Database
    POSTGRES_HOST=localhost
@@ -392,7 +392,7 @@ psql chief_of_staff -c "CREATE EXTENSION IF NOT EXISTS vector;"
 - Ensure correct credentials in `.env`
 
 **Claude API Issues**
-- Verify API key: `ANTHROPIC_API_KEY=sk-ant-api03-...`
+- Verify API key: `ANTHROPIC_API_KEY=sk-ant-api03-[your-key]`
 - Check API credits and rate limits
 - Monitor logs for 529 overload errors
 
