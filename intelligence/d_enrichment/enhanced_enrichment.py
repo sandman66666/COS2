@@ -17,6 +17,7 @@ import random
 from urllib.parse import urljoin, urlparse
 import anthropic
 import os
+import ssl
 
 from utils.logging import structured_logger as logger
 from config.settings import ANTHROPIC_API_KEY
@@ -26,11 +27,13 @@ CLAUDE_MODEL = 'claude-opus-4-20250514'
 
 @dataclass
 class EnhancedEnrichmentResult:
-    """Comprehensive enrichment result with multiple data sources"""
+    """Comprehensive enrichment result with extensive professional intelligence"""
     email: str
     confidence_score: float
     person_data: Dict[str, Any]
     company_data: Dict[str, Any]
+    relationship_intelligence: Dict[str, Any]
+    actionable_insights: Dict[str, Any]
     data_sources: List[str]
     enrichment_timestamp: datetime
     error: Optional[str] = None
@@ -58,15 +61,24 @@ class EnhancedContactEnricher:
         
     async def initialize(self):
         """Initialize with robust web scraping capabilities"""
+        import ssl
+        
+        # Create SSL context with more permissive settings for web scraping
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
         # Enhanced HTTP session with better headers and settings
         connector = aiohttp.TCPConnector(
             limit=10, 
             limit_per_host=2,
             ttl_dns_cache=300,
             use_dns_cache=True,
+            ssl=ssl_context,  # Add SSL context
+            enable_cleanup_closed=True,
         )
         
-        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=10)
         
         # Rotate through multiple realistic user agents
         user_agents = [
@@ -117,6 +129,8 @@ class EnhancedContactEnricher:
                 confidence_score=0.0,
                 person_data={},
                 company_data={},
+                relationship_intelligence={},
+                actionable_insights={},
                 data_sources=[],
                 enrichment_timestamp=datetime.utcnow(),
                 error="No email provided"
@@ -181,6 +195,8 @@ class EnhancedContactEnricher:
                 confidence_score=confidence_score,
                 person_data=person_data,
                 company_data=company_data,
+                relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
+                actionable_insights=synthesized_data.get('actionable_insights', {}),
                 data_sources=data_sources,
                 enrichment_timestamp=datetime.utcnow()
             )
@@ -195,6 +211,8 @@ class EnhancedContactEnricher:
                 confidence_score=0.0,
                 person_data={},
                 company_data={},
+                relationship_intelligence={},
+                actionable_insights={},
                 data_sources=[],
                 enrichment_timestamp=datetime.utcnow(),
                 error=str(e)
@@ -404,65 +422,130 @@ Only include fields where you have reasonable confidence based on the content.
     
     async def _analyze_domain_intelligence(self, domain: str) -> Dict:
         """
-        Analyze email domain to extract company information
+        Analyze domain for company intelligence with robust fallback strategies
         """
-        if self._is_generic_domain(domain):
+        if not domain or self._is_generic_domain(domain):
             return {}
         
-        company_data = {}
+        logger.info(f"  📈 Analyzing domain: {domain}")
         
-        # 1. Basic domain analysis
-        company_name = self._domain_to_company_name(domain)
-        company_data['name'] = company_name
+        # Try multiple strategies for domain intelligence
+        strategies = [
+            self._fetch_domain_info,
+            self._get_domain_via_whois_search,
+            self._get_company_via_web_search
+        ]
         
-        # 2. Try to fetch company website
-        website_data = await self._fetch_domain_info(domain)
-        if website_data:
-            company_data.update(website_data)
-        
-        # 3. Use Claude for domain intelligence
-        if self.claude_client and company_data.get('name'):
+        for strategy in strategies:
             try:
-                prompt = f"""
-Analyze this company domain and provide business intelligence:
-
-Domain: {domain}
-Inferred Company Name: {company_name}
-Website Data: {json.dumps(website_data) if website_data else 'None'}
-
-Based on the domain and any context, provide:
-
-{{
-    "company": {{
-        "name": "Refined company name",
-        "industry": "Likely industry",
-        "size": "Estimated company size",
-        "business_type": "B2B/B2C/etc",
-        "technology_focus": "Tech stack or focus area",
-        "market_position": "Market position if known"
-    }}
-}}
-
-Use your knowledge to make educated inferences about this company.
-"""
-
-                working_model = CLAUDE_MODEL
-                response = await asyncio.to_thread(
-                    self.claude_client.messages.create,
-                    model=working_model,
-                    max_tokens=800,
-                    temperature=0.3,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                
-                result = self._parse_json_response(response.content[0].text)
-                if result and result.get('company'):
-                    company_data.update(result['company'])
-                    
+                company_data = await strategy(domain)
+                if company_data:
+                    logger.info(f"  ✅ Successfully got domain data for {domain} via {strategy.__name__}")
+                    return {
+                        'name': company_data.get('company_name_from_site') or self._domain_to_company_name(domain),
+                        'website': f"https://{domain}",
+                        'description': company_data.get('description', ''),
+                        'industry': company_data.get('industry', ''),
+                        'title': company_data.get('website_title', ''),
+                        'source': 'domain_analysis'
+                    }
             except Exception as e:
-                logger.error(f"Claude domain analysis failed: {e}")
+                logger.debug(f"Strategy {strategy.__name__} failed for {domain}: {e}")
+                continue
         
-        return company_data
+        # If all strategies fail, return basic company data
+        logger.debug(f"All strategies failed for {domain}, returning basic data")
+        return {
+            'name': self._domain_to_company_name(domain),
+            'website': f"https://{domain}",
+            'source': 'domain_fallback'
+        }
+    
+    async def _get_domain_via_whois_search(self, domain: str) -> Dict:
+        """
+        Get domain information via web search (fallback strategy)
+        """
+        try:
+            search_query = f"{domain} company about"
+            encoded_query = search_query.replace(' ', '+')
+            
+            await asyncio.sleep(random.uniform(1, 2))
+            
+            async with self.session.get(
+                f"https://www.google.com/search?q={encoded_query}",
+                headers={'Referer': 'https://www.google.com/'}, 
+                ssl=False
+            ) as response:
+                
+                if response.status == 200:
+                    html = await response.text()
+                    
+                    # Extract company info from search results
+                    return self._extract_company_from_search_results(html, domain)
+                    
+        except Exception as e:
+            logger.debug(f"Web search strategy failed for {domain}: {e}")
+            return {}
+        
+        return {}
+    
+    async def _get_company_via_web_search(self, domain: str) -> Dict:
+        """
+        Alternative web search strategy
+        """
+        try:
+            company_name = self._domain_to_company_name(domain)
+            search_query = f'"{company_name}" company'
+            encoded_query = search_query.replace(' ', '+').replace('"', '%22')
+            
+            await asyncio.sleep(random.uniform(1, 2))
+            
+            async with self.session.get(
+                f"https://www.google.com/search?q={encoded_query}",
+                headers={'Referer': 'https://www.google.com/'}, 
+                ssl=False
+            ) as response:
+                
+                if response.status == 200:
+                    html = await response.text()
+                    return self._extract_company_from_search_results(html, domain)
+                    
+        except Exception as e:
+            logger.debug(f"Alternative web search failed for {domain}: {e}")
+            return {}
+        
+        return {}
+    
+    def _extract_company_from_search_results(self, html: str, domain: str) -> Dict:
+        """
+        Extract company information from Google search results
+        """
+        data = {}
+        
+        # Look for company descriptions in search snippets
+        snippet_patterns = [
+            rf'{re.escape(domain)}[^<]*?-\s*([^<\n.!?]{20,100})',
+            rf'{re.escape(domain.split(".")[0])}[^<]*?(?:is|provides|offers|specializes in)\s*([^<\n.!?]{20,100})',
+        ]
+        
+        for pattern in snippet_patterns:
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                data['description'] = match.group(1).strip()
+                break
+        
+        # Look for industry keywords
+        industry_keywords = [
+            'technology', 'software', 'finance', 'healthcare', 'education', 
+            'startup', 'venture capital', 'consulting', 'marketing', 'e-commerce'
+        ]
+        
+        for keyword in industry_keywords:
+            if keyword in html.lower():
+                data['industry'] = keyword.title()
+                break
+        
+        return data
     
     async def _fetch_domain_info(self, domain: str) -> Dict:
         """
@@ -486,8 +569,8 @@ Use your knowledge to make educated inferences about this company.
                 # Rotate user agent
                 headers = {
                     'User-Agent': random.choice([
-                        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                     ]),
                     'Referer': 'https://www.google.com/',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -497,19 +580,35 @@ Use your knowledge to make educated inferences about this company.
                     'Pragma': 'no-cache'
                 }
                 
-                async with self.session.get(url, headers=headers) as response:
+                async with self.session.get(url, headers=headers, ssl=False) as response:
                     if response.status == 200:
                         html = await response.text()
                         return self._extract_info_from_html(html)
+                    else:
+                        logger.debug(f"HTTP {response.status} for {url}")
                         
+            except asyncio.TimeoutError:
+                logger.debug(f"Timeout fetching {url}")
+                continue
+            except aiohttp.ClientConnectorError as e:
+                logger.debug(f"Connection error for {url}: {e}")
+                continue
+            except aiohttp.ClientSSLError as e:
+                logger.debug(f"SSL error for {url}: {e}")
+                continue
+            except aiohttp.ClientResponseError as e:
+                logger.debug(f"Response error for {url}: {e}")
+                continue
             except Exception as e:
                 # More informative logging for URL fetch failures
+                error_type = type(e).__name__
                 if hasattr(e, 'url') and str(e.url) != url:
-                    logger.debug(f"Failed to fetch {url} (redirected to {e.url}): {e}")
+                    logger.debug(f"Failed to fetch {url} (redirected to {e.url}): {error_type}: {e}")
                 else:
-                    logger.debug(f"Failed to fetch {url}: {e}")
+                    logger.debug(f"Failed to fetch {url}: {error_type}: {e}")
                 continue
         
+        logger.debug(f"Unable to fetch any content for domain: {domain}")
         return {}
     
     def _extract_info_from_html(self, html: str) -> Dict:
@@ -659,54 +758,163 @@ Use your knowledge to make educated inferences about this company.
     async def _claude_data_synthesis(self, email: str, person_data: Dict, 
                                    company_data: Dict, data_sources: List[str]) -> Dict:
         """
-        Use Claude to synthesize and enhance all collected data
+        Use Claude to synthesize and enhance all collected data into comprehensive professional intelligence
         """
         if not self.claude_client:
             return {'person': person_data, 'company': company_data}
         
         try:
             prompt = f"""
-Synthesize and enhance this contact information:
+You are a professional intelligence analyst. Synthesize this data into comprehensive professional intelligence:
 
 EMAIL: {email}
 DATA SOURCES: {', '.join(data_sources)}
 
-PERSON DATA:
+RAW PERSON DATA:
 {json.dumps(person_data, indent=2)}
 
-COMPANY DATA:
+RAW COMPANY DATA:
 {json.dumps(company_data, indent=2)}
 
-Please synthesize this information into a coherent, enhanced profile:
+Extract MAXIMUM intelligence and provide a comprehensive professional profile:
 
 {{
     "person": {{
-        "name": "Best available full name",
-        "title": "Most accurate job title",
-        "seniority_level": "junior/mid/senior/executive",
-        "expertise_areas": ["area1", "area2"],
-        "communication_style": "professional/casual/formal",
-        "confidence_indicators": ["what makes us confident about this data"]
+        "name": "Full professional name",
+        "current_title": "Current role/position",
+        "seniority_level": "junior/mid/senior/executive/founder",
+        "career_stage": "early-career/growth/established/veteran/executive",
+        
+        "professional_background": {{
+            "previous_companies": ["Company 1", "Company 2"],
+            "career_progression": "Brief career journey summary",
+            "years_experience": "estimated total experience",
+            "industry_expertise": ["primary industry", "secondary industry"],
+            "functional_expertise": ["function 1", "function 2"],
+            "education_background": "university/degree if found",
+            "certifications": ["cert 1", "cert 2"] 
+        }},
+        
+        "current_focus": {{
+            "investment_thesis": "if investor - what they invest in",
+            "portfolio_companies": ["company 1", "company 2"] if investor,
+            "key_initiatives": ["current projects/focus areas"],
+            "speaking_topics": ["areas of expertise they speak about"],
+            "content_themes": ["topics they write/post about"]
+        }},
+        
+        "network_intelligence": {{
+            "board_positions": ["company board positions"],
+            "advisor_roles": ["companies they advise"],
+            "professional_associations": ["industry groups"],
+            "conference_appearances": ["events they speak at"],
+            "media_mentions": ["publications that quote them"]
+        }},
+        
+        "communication_insights": {{
+            "communication_style": "professional/casual/formal/technical",
+            "response_patterns": "quick/deliberate/formal",
+            "preferred_topics": ["business topics they engage with"],
+            "social_presence": "active/minimal/thought-leader",
+            "outreach_timing": "best times/approaches for contact"
+        }},
+        
+        "value_proposition": {{
+            "what_they_offer": "value they can provide",
+            "decision_authority": "what they can decide on",
+            "budget_authority": "estimated budget influence",
+            "network_value": "valuable connections they have",
+            "expertise_value": "knowledge they can share"
+        }}
     }},
+    
     "company": {{
         "name": "Official company name",
-        "industry": "Primary industry",
-        "size_category": "startup/small/medium/large/enterprise",
-        "business_model": "B2B/B2C/marketplace/etc",
-        "technology_maturity": "traditional/digital-native/tech-forward",
-        "market_position": "leader/challenger/niche/startup"
+        "industry": "Primary industry sector",
+        "sub_industry": "Specific niche/focus area",
+        
+        "company_profile": {{
+            "business_model": "B2B/B2C/marketplace/SaaS/etc",
+            "revenue_model": "subscription/transaction/licensing/etc",
+            "target_market": "enterprise/SMB/consumer/etc",
+            "company_stage": "seed/growth/mature/public/etc",
+            "employee_count": "estimated size range",
+            "headquarters": "primary location",
+            "founded_year": "year established"
+        }},
+        
+        "financial_intelligence": {{
+            "funding_status": "bootstrapped/funded/public",
+            "funding_rounds": ["Series A $XM", "Series B $XM"],
+            "key_investors": ["investor 1", "investor 2"],
+            "estimated_valuation": "if available",
+            "revenue_estimates": "if available",
+            "growth_trajectory": "growing/stable/declining"
+        }},
+        
+        "market_position": {{
+            "competitive_landscape": "leader/challenger/niche/startup",
+            "key_competitors": ["competitor 1", "competitor 2"],
+            "differentiation": "what makes them unique",
+            "market_trends": "industry trends affecting them",
+            "growth_opportunities": "expansion areas"
+        }},
+        
+        "technology_profile": {{
+            "tech_stack": ["primary technologies used"],
+            "digital_maturity": "traditional/digital-native/tech-forward",
+            "innovation_focus": ["AI/cloud/mobile/etc"],
+            "technology_partnerships": ["key tech partners"],
+            "digital_transformation": "stage of digital adoption"
+        }},
+        
+        "business_intelligence": {{
+            "key_products": ["main products/services"],
+            "customer_base": "types of customers",
+            "geographic_presence": "markets they serve",
+            "partnership_strategy": "how they work with partners",
+            "expansion_plans": "growth strategies",
+            "acquisition_history": ["companies acquired"],
+            "exit_strategy": "IPO/acquisition potential"
+        }},
+        
+        "decision_making": {{
+            "decision_makers": ["key executives by function"],
+            "procurement_process": "how they buy",
+            "budget_cycles": "when they make purchasing decisions",
+            "vendor_preferences": "types of partners they work with",
+            "evaluation_criteria": "what they value in partners"
+        }}
+    }},
+    
+    "relationship_intelligence": {{
+        "engagement_level": "high/medium/low based on email frequency",
+        "relationship_stage": "cold/warm/active/partnership",
+        "mutual_connections": ["shared network if identified"],
+        "collaboration_opportunities": ["potential areas to work together"],
+        "referral_potential": "likelihood they'd make introductions",
+        "influence_score": "how influential they are in their network"
+    }},
+    
+    "actionable_insights": {{
+        "best_approach": "how to most effectively engage them",
+        "value_propositions": ["what would interest them most"],
+        "timing_considerations": "when to reach out",
+        "conversation_starters": ["relevant topics to discuss"],
+        "meeting_likelihood": "probability they'd take a meeting",
+        "decision_timeline": "how quickly they typically make decisions"
     }}
 }}
 
-Resolve any conflicts in the data and provide the most accurate synthesis.
+Be thorough and intelligent. Extract every possible insight. Make educated inferences where data suggests patterns. This intelligence will drive important business decisions.
 """
 
             working_model = CLAUDE_MODEL
             response = await asyncio.to_thread(
                 self.claude_client.messages.create,
                 model=working_model,
-                max_tokens=1200,
-                temperature=0.2,
+                max_tokens=4000,  # Increased for richer output
+                temperature=0.3,   # Slightly higher for more creative synthesis
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -714,7 +922,9 @@ Resolve any conflicts in the data and provide the most accurate synthesis.
             if result:
                 return {
                     'person': result.get('person', person_data),
-                    'company': result.get('company', company_data)
+                    'company': result.get('company', company_data),
+                    'relationship_intelligence': result.get('relationship_intelligence', {}),
+                    'actionable_insights': result.get('actionable_insights', {})
                 }
                 
         except Exception as e:
@@ -897,6 +1107,8 @@ Resolve any conflicts in the data and provide the most accurate synthesis.
                 confidence_score=0.0,
                 person_data={},
                 company_data={},
+                relationship_intelligence={},
+                actionable_insights={},
                 data_sources=[],
                 enrichment_timestamp=datetime.utcnow(),
                 error="No email provided"
@@ -968,6 +1180,8 @@ Resolve any conflicts in the data and provide the most accurate synthesis.
                 confidence_score=confidence_score,
                 person_data=person_data,
                 company_data=company_data,
+                relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
+                actionable_insights=synthesized_data.get('actionable_insights', {}),
                 data_sources=data_sources,
                 enrichment_timestamp=datetime.utcnow()
             )
@@ -982,7 +1196,50 @@ Resolve any conflicts in the data and provide the most accurate synthesis.
                 confidence_score=0.0,
                 person_data={},
                 company_data=cached_domain_data.copy(),  # At least return cached domain data
+                relationship_intelligence={},
+                actionable_insights={},
                 data_sources=data_sources,
                 enrichment_timestamp=datetime.utcnow(),
                 error=str(e)
-            ) 
+            )
+
+    async def test_connectivity(self, test_url: str = "https://httpbin.org/get") -> Dict:
+        """
+        Test HTTP connectivity and SSL configuration
+        
+        Args:
+            test_url: URL to test connectivity against
+            
+        Returns:
+            Dictionary with test results
+        """
+        if not self.session:
+            await self.initialize()
+        
+        result = {
+            'test_url': test_url,
+            'success': False,
+            'error': None,
+            'status_code': None,
+            'response_time': None
+        }
+        
+        try:
+            import time
+            start_time = time.time()
+            
+            async with self.session.get(test_url, ssl=False) as response:
+                result['status_code'] = response.status
+                result['response_time'] = time.time() - start_time
+                
+                if response.status == 200:
+                    result['success'] = True
+                    text = await response.text()
+                    result['response_length'] = len(text)
+                else:
+                    result['error'] = f"HTTP {response.status}"
+                    
+        except Exception as e:
+            result['error'] = f"{type(e).__name__}: {str(e)}"
+            
+        return result 

@@ -1,4 +1,6 @@
 // User Authentication Functions
+console.log('🔧 Dashboard.js script loaded!');
+
 async function loadUserInfo() {
     try {
         const response = await fetch('/api/user-info');
@@ -2834,7 +2836,11 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 async function initializeDashboard() {
+    console.log('🚀 initializeDashboard() called');
+    
     const app = document.getElementById('app');
+    console.log('📱 App element found:', app);
+    
     app.innerHTML = `
         <div class="dashboard-container">
             <!-- Header -->
@@ -4605,596 +4611,1184 @@ function formatAugmentResults(result) {
 }
 
 function formatTreeResults(result) {
-    // Extract data from both possible result structures
-    const tree = result.knowledge_tree || result;
-    const analysisStats = result.analysis_summary || result.processing_stats || {};
-    const contentBreakdown = result.content_breakdown || {};
+    if (!result.knowledge_tree) {
+        return `
+            <div class="result-card">
+                <h4>❌ Knowledge Tree Generation Failed</h4>
+                <pre>${JSON.stringify(result, null, 2)}</pre>
+            </div>
+        `;
+    }
+
+    const tree = result.knowledge_tree;
     
-    // Build comprehensive stats
-    const stats = {
-        topics: Object.keys(tree.topics || {}).length,
-        relationships: Object.keys(tree.relationships || {}).length,
-        businessDomains: Object.keys(tree.business_domains || {}).length,
-        timelineEvents: (tree.timeline || []).length,
-        emailsAnalyzed: analysisStats.emails_analyzed || 0,
-        contactsIntegrated: analysisStats.contacts_integrated || 0,
-        claudeBatches: analysisStats.claude_batches_used || 0,
-        systemVersion: analysisStats.system_version || 'Claude 4 Opus'
-    };
-    
+    // Enhanced tree visualization with tabs
     return `
-        <div class="knowledge-tree-viewer">
-            <div class="tree-header">
-                <h3>🌳 Knowledge Tree - Strategic Intelligence</h3>
-                <p>Comprehensive analysis powered by ${stats.systemVersion}</p>
+        <div class="result-card tree-result-card">
+            <div class="tree-result-header">
+                <h4>🌳 Strategic Knowledge Tree</h4>
+                <div class="tree-actions">
+                    <button onclick="showTreeVisualization()" class="btn btn-primary">
+                        🗺️ Open Tree Explorer
+                    </button>
+                    <button onclick="downloadTreeData()" class="btn btn-secondary">
+                        📥 Download Tree Data
+                    </button>
+                </div>
             </div>
             
-            <!-- Stats Overview -->
+            <!-- Tree Tabs -->
+            <div class="tree-tabs">
+                <button class="tree-tab-btn active" onclick="showTreeTab(event, 'overview')">
+                    📊 Overview
+                </button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'topics')">
+                    📁 Topics
+                </button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'relationships')">
+                    🤝 Relationships
+                </button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'timeline')">
+                    📅 Timeline
+                </button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'domains')">
+                    🏢 Domains
+                </button>
+            </div>
+
+            <!-- Overview Tab -->
+            <div id="tree-overview-tab" class="tree-tab-content active">
+                ${generateTreeOverview(tree)}
+            </div>
+
+            <!-- Topics Tab -->
+            <div id="tree-topics-tab" class="tree-tab-content">
+                ${generateTopicsView(tree.phase1_claude_tree?.topics || tree.topics || {})}
+            </div>
+
+            <!-- Relationships Tab -->
+            <div id="tree-relationships-tab" class="tree-tab-content">
+                ${generateRelationshipsView(tree.phase1_claude_tree?.relationships || tree.relationships || {})}
+            </div>
+
+            <!-- Timeline Tab -->
+            <div id="tree-timeline-tab" class="tree-tab-content">
+                ${generateTimelineView(tree.phase1_claude_tree?.timeline || tree.timeline || [])}
+            </div>
+
+            <!-- Domains Tab -->
+            <div id="tree-domains-tab" class="tree-tab-content">
+                ${generateBusinessDomainsView(tree.phase1_claude_tree?.business_domains || tree.business_domains || {})}
+            </div>
+        </div>
+    `;
+}
+
+function generateTreeOverview(tree) {
+    const phase1 = tree.phase1_claude_tree || {};
+    const phase2 = tree.phase2_strategic_analysis || {};
+    const phase3 = tree.phase3_opportunity_analysis || {};
+    const performance = tree.processing_performance || {};
+    
+    const topicsCount = Object.keys(phase1.topics || tree.topics || {}).length;
+    const relationshipsCount = Object.keys(phase1.relationships || tree.relationships || {}).length;
+    const domainsCount = Object.keys(phase1.business_domains || tree.business_domains || {}).length;
+    const timelineCount = (phase1.timeline || tree.timeline || []).length;
+    const strategicInsights = phase2.total_insights || 0;
+    const opportunities = (phase3.opportunities || []).length;
+    
+    return `
+        <div class="tree-overview">
             <div class="tree-stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number">${stats.topics}</div>
-                    <div class="stat-label">Topics Identified</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">${stats.relationships}</div>
-                    <div class="stat-label">Relationships</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">${stats.businessDomains}</div>
-                    <div class="stat-label">Business Domains</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">${stats.emailsAnalyzed}</div>
-                    <div class="stat-label">Emails Analyzed</div>
-                </div>
-            </div>
-            
-            <!-- Navigation Tabs -->
-            <div class="tree-nav-tabs">
-                <button class="tree-tab-btn active" onclick="showTreeTab(event, 'topics-view')">📊 Topics</button>
-                <button class="tree-tab-btn" onclick="showTreeTab(event, 'relationships-view')">🤝 Relationships</button>
-                <button class="tree-tab-btn" onclick="showTreeTab(event, 'domains-view')">🏢 Business Domains</button>
-                <button class="tree-tab-btn" onclick="showTreeTab(event, 'timeline-view')">📅 Timeline</button>
-                <button class="tree-tab-btn" onclick="showTreeTab(event, 'raw-data-view')">🔍 Raw Data</button>
-            </div>
-            
-            <!-- Tab Contents -->
-            <div id="topics-view" class="tree-tab-content active">
-                <h4>📊 Strategic Topics</h4>
-                <div class="topics-grid">
-                    ${generateTopicsView(tree.topics || {})}
-                </div>
-            </div>
-            
-            <div id="relationships-view" class="tree-tab-content">
-                <h4>🤝 Relationship Intelligence</h4>
-                <div class="relationships-grid">
-                    ${generateRelationshipsView(tree.relationships || {})}
-                </div>
-            </div>
-            
-            <div id="domains-view" class="tree-tab-content">
-                <h4>🏢 Business Domain Analysis</h4>
-                <div class="domains-grid">
-                    ${generateBusinessDomainsView(tree.business_domains || {})}
-                </div>
-            </div>
-            
-            <div id="timeline-view" class="tree-tab-content">
-                <h4>📅 Strategic Timeline</h4>
-                <div class="timeline-container">
-                    ${generateTimelineView(tree.timeline || [])}
-                </div>
-            </div>
-            
-            <div id="raw-data-view" class="tree-tab-content">
-                <h4>🔍 Complete Data Structure</h4>
-                <pre class="tree-json-view">${JSON.stringify(tree, null, 2)}</pre>
-            </div>
-        </div>
-        
-        <style>
-            .knowledge-tree-viewer {
-                max-width: 100%;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            }
-            
-            .tree-header {
-                text-align: center;
-                margin-bottom: 20px;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                border-radius: 10px;
-            }
-            
-            .tree-header h3 {
-                margin: 0;
-                font-size: 1.5em;
-            }
-            
-            .tree-stats-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            
-            .stat-card {
-                background: white;
-                padding: 15px;
-                border-radius: 8px;
-                text-align: center;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                border: 1px solid #e0e0e0;
-            }
-            
-            .stat-number {
-                font-size: 1.8em;
-                font-weight: bold;
-                color: #3498db;
-                margin-bottom: 5px;
-            }
-            
-            .stat-label {
-                color: #666;
-                font-size: 0.9em;
-            }
-            
-            .tree-nav-tabs {
-                display: flex;
-                border-bottom: 2px solid #e0e0e0;
-                margin-bottom: 20px;
-                overflow-x: auto;
-            }
-            
-            .tree-tab-btn {
-                padding: 12px 20px;
-                border: none;
-                background: none;
-                cursor: pointer;
-                border-bottom: 3px solid transparent;
-                font-size: 0.9em;
-                white-space: nowrap;
-                transition: all 0.3s ease;
-            }
-            
-            .tree-tab-btn:hover {
-                background: #f8f9fa;
-            }
-            
-            .tree-tab-btn.active {
-                border-bottom-color: #3498db;
-                color: #3498db;
-                font-weight: bold;
-            }
-            
-            .tree-tab-content {
-                display: none;
-                animation: fadeIn 0.3s ease;
-            }
-            
-            .tree-tab-content.active {
-                display: block;
-            }
-            
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(10px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            
-            .topics-grid, .relationships-grid, .domains-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 15px;
-            }
-            
-            .topic-card, .relationship-card, .domain-card {
-                background: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 8px;
-                padding: 20px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
-            }
-            
-            .topic-card:hover, .relationship-card:hover, .domain-card:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            }
-            
-            .card-title {
-                font-size: 1.1em;
-                font-weight: bold;
-                color: #2c3e50;
-                margin-bottom: 10px;
-                border-bottom: 2px solid #3498db;
-                padding-bottom: 5px;
-            }
-            
-            .card-detail {
-                margin-bottom: 8px;
-                font-size: 0.9em;
-                line-height: 1.4;
-            }
-            
-            .card-detail strong {
-                color: #3498db;
-            }
-            
-            .timeline-container {
-                max-height: 400px;
-                overflow-y: auto;
-            }
-            
-            .timeline-item {
-                background: white;
-                border-left: 4px solid #3498db;
-                padding: 15px;
-                margin-bottom: 10px;
-                border-radius: 0 8px 8px 0;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            
-            .timeline-date {
-                font-weight: bold;
-                color: #3498db;
-                margin-bottom: 5px;
-            }
-            
-            .tree-json-view {
-                background: #2c3e50;
-                color: #ecf0f1;
-                padding: 20px;
-                border-radius: 5px;
-                overflow-x: auto;
-                font-size: 0.8em;
-                max-height: 400px;
-                overflow-y: auto;
-            }
-            
-            .no-data {
-                text-align: center;
-                color: #666;
-                font-style: italic;
-                padding: 20px;
-                background: #f8f9fa;
-                border-radius: 5px;
-            }
-        </style>
-    `;
-}
-
-// Helper functions for generating views
-function generateTopicsView(topics) {
-    if (Object.keys(topics).length === 0) {
-        return '<div class="no-data">No topics identified yet. Run the knowledge tree analysis to see strategic topics.</div>';
-    }
-    
-    return Object.entries(topics).map(([topicName, topicData]) => `
-        <div class="topic-card">
-            <div class="card-title">${topicName.replace(/_/g, ' ')}</div>
-            <div class="card-detail"><strong>Participants:</strong> ${(topicData.participants || []).slice(0, 3).join(', ')}${(topicData.participants || []).length > 3 ? '...' : ''}</div>
-            <div class="card-detail"><strong>Business Relevance:</strong> ${topicData.business_relevance || 'Unknown'}</div>
-            <div class="card-detail"><strong>Action Items:</strong> ${(topicData.action_items || []).length}</div>
-            <div class="card-detail"><strong>Key Points:</strong> ${(topicData.key_points || []).slice(0, 2).join('; ')}${(topicData.key_points || []).length > 2 ? '...' : ''}</div>
-            <div class="card-detail"><strong>Content Sources:</strong> ${(topicData.content_sources || []).join(', ')}</div>
-        </div>
-    `).join('');
-}
-
-function generateRelationshipsView(relationships) {
-    if (Object.keys(relationships).length === 0) {
-        return '<div class="no-data">No relationships analyzed yet. Build the knowledge tree to see relationship intelligence.</div>';
-    }
-    
-    return Object.entries(relationships).map(([email, relationshipData]) => `
-        <div class="relationship-card">
-            <div class="card-title">${email}</div>
-            <div class="card-detail"><strong>Status:</strong> <span style="color: ${getStatusColor(relationshipData.status)}">${relationshipData.status || 'Unknown'}</span></div>
-            <div class="card-detail"><strong>Frequency:</strong> ${relationshipData.frequency || 'Unknown'}</div>
-            <div class="card-detail"><strong>Engagement Level:</strong> ${Math.round((relationshipData.engagement_level || 0) * 100)}%</div>
-            <div class="card-detail"><strong>Business Context:</strong> ${(relationshipData.business_context || 'None').substring(0, 100)}${(relationshipData.business_context || '').length > 100 ? '...' : ''}</div>
-            <div class="card-detail"><strong>Topics Involved:</strong> ${(relationshipData.topics_involved || []).slice(0, 3).join(', ')}${(relationshipData.topics_involved || []).length > 3 ? '...' : ''}</div>
-        </div>
-    `).join('');
-}
-
-function generateBusinessDomainsView(businessDomains) {
-    if (Object.keys(businessDomains).length === 0) {
-        return '<div class="no-data">No business domains identified yet. Complete the knowledge tree analysis to see domain breakdown.</div>';
-    }
-    
-    return Object.entries(businessDomains).map(([domain, topics]) => `
-        <div class="domain-card">
-            <div class="card-title">${domain.replace(/_/g, ' ').toUpperCase()}</div>
-            <div class="card-detail"><strong>Related Topics:</strong> ${Array.isArray(topics) ? topics.length : Object.keys(topics).length}</div>
-            <div class="card-detail"><strong>Items:</strong> ${Array.isArray(topics) ? topics.slice(0, 3).join(', ') : Object.keys(topics).slice(0, 3).join(', ')}${(Array.isArray(topics) ? topics.length : Object.keys(topics).length) > 3 ? '...' : ''}</div>
-        </div>
-    `).join('');
-}
-
-function generateTimelineView(timeline) {
-    if (timeline.length === 0) {
-        return '<div class="no-data">No timeline events found. The knowledge tree analysis will generate strategic timeline events.</div>';
-    }
-    
-    return timeline.map(event => `
-        <div class="timeline-item">
-            <div class="timeline-date">${event.date}</div>
-            <div class="card-detail"><strong>Event:</strong> ${event.event}</div>
-            <div class="card-detail"><strong>Participants:</strong> ${(event.participants || []).join(', ')}</div>
-            <div class="card-detail"><strong>Topic:</strong> ${event.topic || 'General'}</div>
-            <div class="card-detail"><strong>Category:</strong> ${event.category || event.content_type || 'Unknown'}</div>
-        </div>
-    `).join('');
-}
-
-function getStatusColor(status) {
-    const colors = {
-        'ESTABLISHED': '#28a745',
-        'ONGOING': '#007bff', 
-        'ATTEMPTED': '#ffc107',
-        'DORMANT': '#6c757d'
-    };
-    return colors[status] || '#6c757d';
-}
-
-function showTreeTab(event, tabName) {
-    // Remove active class from all tab buttons
-    document.querySelectorAll('.tree-tab-btn').forEach(btn => btn.classList.remove('active'));
-    
-    // Remove active class from all tab contents
-    document.querySelectorAll('.tree-tab-content').forEach(content => content.classList.remove('active'));
-    
-    // Add active class to clicked button
-    event.target.classList.add('active');
-    
-    // Show selected tab content
-    const selectedContent = document.getElementById(tabName);
-    if (selectedContent) {
-        selectedContent.classList.add('active');
-    }
-}
-
-function formatIntelligenceResults(result) {
-    return `
-        <div class="formatted-results">
-            <div class="results-summary">
-                <h4>🧠 Strategic Intelligence Summary</h4>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <span class="stat-number">✅</span>
-                        <span class="stat-label">Intelligence Ready</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">🔗</span>
-                        <span class="stat-label">Integrated</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">🎯</span>
-                        <span class="stat-label">Strategic</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">📊</span>
-                        <span class="stat-label">Analyzed</span>
+                <div class="tree-stat-card topics">
+                    <div class="stat-icon">📁</div>
+                    <div class="stat-content">
+                        <div class="stat-number">${topicsCount}</div>
+                        <div class="stat-label">Key Topics</div>
                     </div>
                 </div>
-                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+                
+                <div class="tree-stat-card relationships">
+                    <div class="stat-icon">🤝</div>
+                    <div class="stat-content">
+                        <div class="stat-number">${relationshipsCount}</div>
+                        <div class="stat-label">Relationships</div>
+                    </div>
+                </div>
+                
+                <div class="tree-stat-card domains">
+                    <div class="stat-icon">🏢</div>
+                    <div class="stat-content">
+                        <div class="stat-number">${domainsCount}</div>
+                        <div class="stat-label">Business Domains</div>
+                    </div>
+                </div>
+                
+                <div class="tree-stat-card timeline">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-content">
+                        <div class="stat-number">${timelineCount}</div>
+                        <div class="stat-label">Timeline Events</div>
+                    </div>
+                </div>
+                
+                ${strategicInsights > 0 ? `
+                    <div class="tree-stat-card insights">
+                        <div class="stat-icon">🧠</div>
+                        <div class="stat-content">
+                            <div class="stat-number">${strategicInsights}</div>
+                            <div class="stat-label">Strategic Insights</div>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${opportunities > 0 ? `
+                    <div class="tree-stat-card opportunities">
+                        <div class="stat-icon">🎯</div>
+                        <div class="stat-content">
+                            <div class="stat-number">${opportunities}</div>
+                            <div class="stat-label">Opportunities</div>
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+            
+            ${performance.total_duration_seconds ? `
+                <div class="processing-summary">
+                    <h5>⚡ Processing Performance</h5>
+                    <div class="performance-grid">
+                        <div class="performance-item">
+                            <span class="performance-label">Phase 1 (Content Consolidation):</span>
+                            <span class="performance-value">${performance.phase1_duration_seconds?.toFixed(1) || 0}s</span>
+                        </div>
+                        ${performance.phase2_duration_seconds ? `
+                            <div class="performance-item">
+                                <span class="performance-label">Phase 2 (Strategic Analysis):</span>
+                                <span class="performance-value">${performance.phase2_duration_seconds.toFixed(1)}s</span>
+                            </div>
+                        ` : ''}
+                        ${performance.phase3_duration_seconds ? `
+                            <div class="performance-item">
+                                <span class="performance-label">Phase 3 (Opportunity Scoring):</span>
+                                <span class="performance-value">${performance.phase3_duration_seconds.toFixed(1)}s</span>
+                            </div>
+                        ` : ''}
+                        <div class="performance-item total">
+                            <span class="performance-label">Total Processing Time:</span>
+                            <span class="performance-value">${performance.total_duration_seconds.toFixed(1)}s</span>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+            
+            <div class="tree-description">
+                <h5>🧠 About This Knowledge Tree</h5>
+                <p>This strategic intelligence tree represents your comprehensive business knowledge, consolidating insights from your communications, relationships, and content into an organized, actionable framework.</p>
+                <p><strong>Architecture:</strong> ${tree.architecture || 'claude_consolidation_plus_strategic_analysis'}</p>
+                <p><strong>Generated:</strong> ${tree.build_timestamp || tree.created_at || 'Unknown'}</p>
             </div>
         </div>
     `;
 }
 
-function showResultTab(event, tabName) {
-    // Remove active class from all tabs
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+function showTreeVisualization() {
+    // Open the enhanced tree visualization modal
+    const modal = document.getElementById('contentModal');
+    const modalContent = document.getElementById('modalContent');
     
-    // Add active class to clicked tab
-    event.target.classList.add('active');
-    document.getElementById(`${tabName}-tab`).classList.add('active');
-}
-
-function showModal(content) {
-    // Remove any existing result modal first
-    const existingModal = document.getElementById('resultModal');
-    if (existingModal) {
-        existingModal.remove();
-    }
-    
-    // Create new modal
-    const modal = document.createElement('div');
-    modal.id = 'resultModal';
-    modal.className = 'modal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 1000;
-        padding: 20px;
-        box-sizing: border-box;
-    `;
-    
-    modal.innerHTML = `
-        <div class="modal-content" style="
-            background: white;
-            border-radius: 8px;
-            padding: 20px;
-            max-width: 90vw;
-            max-height: 90vh;
-            overflow-y: auto;
-            position: relative;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        ">
-            <span class="modal-close" onclick="closeModal()" style="
-                position: absolute;
-                top: 10px;
-                right: 15px;
-                font-size: 24px;
-                font-weight: bold;
-                cursor: pointer;
-                color: #666;
-                z-index: 1001;
-                background: white;
-                border-radius: 50%;
-                width: 30px;
-                height: 30px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                border: 1px solid #ddd;
-            " onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='white'">&times;</span>
-            <div id="modalContent" style="margin-top: 20px;">
-                ${content}
-            </div>
-        </div>
-    `;
-    
-    // Add click outside to close
-    modal.onclick = function(event) {
-        if (event.target === modal) {
-            closeModal();
+    // Get the current knowledge tree data
+    fetchCurrentKnowledgeTree().then(tree => {
+        if (tree) {
+            modalContent.innerHTML = generateEnhancedTreeVisualization(tree);
+            modal.style.display = 'block';
+            
+            // Initialize tree visualization interactions
+            initializeTreeVisualizationInteractions();
+        } else {
+            showMessage('Please build a knowledge tree first', 'warning');
         }
-    };
-    
-    // Prevent modal content clicks from closing modal
-    modal.querySelector('.modal-content').onclick = function(event) {
-        event.stopPropagation();
-    };
-    
-    document.body.appendChild(modal);
-    
-    // Ensure modal is visible
-    setTimeout(() => {
-        modal.style.display = 'flex';
-    }, 10);
-    
-    console.log('✅ Modal created and displayed');
+    });
 }
 
-function closeModal() {
-    const modal = document.getElementById('resultModal');
-    if (modal) {
-        modal.style.display = 'none';
-        // Remove modal after animation
-        setTimeout(() => {
-            if (modal.parentNode) {
-                modal.parentNode.removeChild(modal);
-            }
-        }, 100);
-        console.log('✅ Modal closed and removed');
+async function fetchCurrentKnowledgeTree() {
+    try {
+        const response = await fetch('/api/intelligence/knowledge-tree');
+        const result = await response.json();
+        
+        if (result.success && result.knowledge_tree) {
+            return result.knowledge_tree;
+        }
+        return null;
+    } catch (error) {
+        console.error('Error fetching knowledge tree:', error);
+        return null;
     }
 }
 
-// === FULL PIPELINE EXECUTION ===
+function generateEnhancedTreeVisualization(tree) {
+    const phase1 = tree.phase1_claude_tree || tree;
+    const phase2 = tree.phase2_strategic_analysis || {};
+    const phase3 = tree.phase3_opportunity_analysis || {};
+    
+    const topics = phase1.topics || {};
+    const relationships = phase1.relationships || {};
+    const domains = phase1.business_domains || {};
+    const timeline = phase1.timeline || [];
+    
+    return `
+        <div class="enhanced-tree-visualization">
+            <div class="tree-header">
+                <h2>🧠 Strategic Intelligence Tree Explorer</h2>
+                <div class="tree-meta">
+                    Generated: ${tree.build_timestamp || tree.created_at || 'Unknown'} | 
+                    Architecture: ${tree.architecture || 'Enhanced Strategic Analysis'}
+                </div>
+            </div>
+            
+            <div class="tree-stats-header">
+                <div class="stat-item">
+                    <span class="stat-number">${Object.keys(topics).length}</span>
+                    <span class="stat-label">Key Topics</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">${Object.keys(relationships).length}</span>
+                    <span class="stat-label">Relationships</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">${Object.keys(domains).length}</span>
+                    <span class="stat-label">Business Domains</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number">${timeline.length}</span>
+                    <span class="stat-label">Timeline Events</span>
+                </div>
+                ${phase2.total_insights ? `
+                    <div class="stat-item">
+                        <span class="stat-number">${phase2.total_insights}</span>
+                        <span class="stat-label">Strategic Insights</span>
+                    </div>
+                ` : ''}
+                ${phase3.opportunities?.length ? `
+                    <div class="stat-item">
+                        <span class="stat-number">${phase3.opportunities.length}</span>
+                        <span class="stat-label">Opportunities</span>
+                    </div>
+                ` : ''}
+            </div>
+            
+            <!-- Topics Section -->
+            <div class="tree-section">
+                <div class="section-title">
+                    📁 Strategic Topics
+                </div>
+                <div class="topic-grid">
+                    ${generateTopicCards(topics)}
+                </div>
+            </div>
+            
+            <!-- Relationships Section -->
+            <div class="tree-section">
+                <div class="section-title">
+                    🤝 Key Relationships
+                </div>
+                <div class="contact-grid">
+                    ${generateContactCards(relationships)}
+                </div>
+            </div>
+            
+            <!-- Timeline Section -->
+            ${timeline.length > 0 ? `
+                <div class="tree-section">
+                    <div class="section-title">
+                        📅 Business Timeline
+                    </div>
+                    <div class="timeline">
+                        ${generateTimelineItems(timeline)}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Business Domains Section -->
+            <div class="tree-section">
+                <div class="section-title">
+                    🏢 Business Domain Analysis
+                </div>
+                <div class="domain-grid">
+                    ${generateDomainCards(domains)}
+                </div>
+            </div>
+            
+            ${phase2.agent_insights ? generateStrategicInsightsSection(phase2.agent_insights) : ''}
+            ${phase3.opportunities?.length > 0 ? generateOpportunitiesSection(phase3.opportunities) : ''}
+        </div>
+    `;
+}
+
+function generateTopicCards(topics) {
+    const topicCategories = {
+        'funding': { color: '#dc3545', icon: '💰' },
+        'growth': { color: '#28a745', icon: '📈' },
+        'ai': { color: '#007bff', icon: '🤖' },
+        'restructuring': { color: '#ffc107', icon: '🔄' },
+        'investment': { color: '#6f42c1', icon: '💼' },
+        'partnership': { color: '#17a2b8', icon: '🤝' },
+        'technology': { color: '#fd7e14', icon: '⚙️' },
+        'default': { color: '#6c757d', icon: '📋' }
+    };
+    
+    return Object.entries(topics).map(([topicName, topicData]) => {
+        const category = Object.keys(topicCategories).find(cat => 
+            topicName.toLowerCase().includes(cat)
+        ) || 'default';
+        
+        const categoryInfo = topicCategories[category];
+        const participants = topicData.participants || [];
+        const keyPoints = topicData.key_points || [];
+        const businessRelevance = topicData.business_relevance || 'medium';
+        
+        return `
+            <div class="topic-card ${category}" onclick="expandTopicCard(this)" style="border-left-color: ${categoryInfo.color}">
+                <div class="relevance-badge relevance-${businessRelevance}">
+                    ${businessRelevance.toUpperCase()}
+                </div>
+                
+                <div class="topic-title">
+                    <span class="topic-icon">${categoryInfo.icon}</span>
+                    ${topicName.replace(/_/g, ' ')}
+                </div>
+                
+                <div class="topic-summary">
+                    ${topicData.timeline_summary || topicData.business_context || 'Strategic business topic'}
+                </div>
+                
+                ${keyPoints.length > 0 ? `
+                    <div class="key-points">
+                        <h4>Key Points</h4>
+                        <ul class="point-list">
+                            ${keyPoints.slice(0, 3).map(point => `<li>${point}</li>`).join('')}
+                            ${keyPoints.length > 3 ? `<li><em>+${keyPoints.length - 3} more points...</em></li>` : ''}
+                        </ul>
+                    </div>
+                ` : ''}
+                
+                ${participants.length > 0 ? `
+                    <div class="participants">
+                        <h4>Participants</h4>
+                        <div class="participant-tags">
+                            ${participants.slice(0, 4).map(participant => 
+                                `<span class="participant-tag">${participant}</span>`
+                            ).join('')}
+                            ${participants.length > 4 ? `<span class="participant-tag">+${participants.length - 4} more</span>` : ''}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <div class="topic-actions" style="display: none;">
+                    <button onclick="drillDownTopic('${topicName}', event)" class="drill-down-btn">
+                        🔍 View Details
+                    </button>
+                    <button onclick="showRelatedContent('${topicName}', event)" class="related-content-btn">
+                        📄 Related Content
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function generateContactCards(relationships) {
+    return Object.entries(relationships).map(([contactEmail, contactData]) => {
+        const name = contactData.name || contactEmail.split('@')[0];
+        const company = contactData.company || '';
+        const relationshipStatus = contactData.relationship_status || 'unknown';
+        const engagementScore = contactData.engagement_score || Math.random() * 0.5 + 0.3; // Fallback
+        const topicsInvolved = contactData.topics_involved || [];
+        
+        const statusColors = {
+            'established': '#28a745',
+            'ongoing': '#17a2b8', 
+            'attempted': '#ffc107',
+            'cold': '#dc3545',
+            'unknown': '#6c757d'
+        };
+        
+        return `
+            <div class="contact-card" onclick="expandContactCard(this)" style="border-left-color: ${statusColors[relationshipStatus] || statusColors.unknown}">
+                <div class="contact-header">
+                    <div>
+                        <div class="contact-name">${name}</div>
+                        <div class="contact-email">${contactEmail}</div>
+                        ${company ? `<div class="contact-company">${company}</div>` : ''}
+                    </div>
+                    <div class="engagement-score" style="background: ${statusColors[relationshipStatus] || statusColors.unknown}">
+                        ${engagementScore.toFixed(1)}
+                    </div>
+                </div>
+                
+                <div class="contact-context">
+                    ${contactData.communication_summary || 'Professional contact with ongoing relationship.'}
+                </div>
+                
+                ${topicsInvolved.length > 0 ? `
+                    <div class="contact-topics">
+                        ${topicsInvolved.slice(0, 3).map(topic => 
+                            `<span class="topic-tag">${topic}</span>`
+                        ).join('')}
+                        ${topicsInvolved.length > 3 ? `<span class="topic-tag">+${topicsInvolved.length - 3} more</span>` : ''}
+                    </div>
+                ` : ''}
+                
+                <div class="contact-actions" style="display: none;">
+                    <button onclick="drillDownContact('${contactEmail}', event)" class="drill-down-btn">
+                        🔍 View Details
+                    </button>
+                    <button onclick="showContactHistory('${contactEmail}', event)" class="history-btn">
+                        📧 Communication History
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function generateTimelineItems(timeline) {
+    return timeline.map(event => {
+        const date = new Date(event.date || event.timestamp);
+        const formattedDate = date.toLocaleDateString();
+        
+        return `
+            <div class="timeline-item">
+                <div class="timeline-date">${formattedDate}</div>
+                <div class="timeline-event">
+                    ${event.event || event.description || event}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function generateDomainCards(domains) {
+    return Object.entries(domains).map(([domainName, domainData]) => {
+        const topics = Array.isArray(domainData) ? domainData : 
+                      typeof domainData === 'object' ? Object.keys(domainData) : 
+                      [domainData];
+        
+        return `
+            <div class="domain-card" onclick="expandDomainCard(this)">
+                <div class="domain-name">${domainName.replace(/_/g, ' ')}</div>
+                <div class="domain-topics">
+                    ${topics.slice(0, 3).join(', ')}
+                    ${topics.length > 3 ? ` (+${topics.length - 3} more)` : ''}
+                </div>
+                
+                <div class="domain-actions" style="display: none;">
+                    <button onclick="drillDownDomain('${domainName}', event)" class="drill-down-btn">
+                        🔍 Explore Domain
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function generateStrategicInsightsSection(insights) {
+    return `
+        <div class="tree-section">
+            <div class="section-title">
+                🧠 Strategic Intelligence Insights
+            </div>
+            <div class="insights-grid">
+                ${Object.entries(insights).map(([agentName, agentInsights]) => `
+                    <div class="insight-category">
+                        <h4>${agentName.replace(/_/g, ' ').toUpperCase()}</h4>
+                        <div class="insight-items">
+                            ${Array.isArray(agentInsights) ? 
+                                agentInsights.slice(0, 3).map(insight => `
+                                    <div class="insight-item">
+                                        ${typeof insight === 'object' ? insight.title || insight.description || JSON.stringify(insight).slice(0, 100) : insight}
+                                    </div>
+                                `).join('') : 
+                                `<div class="insight-item">${agentInsights}</div>`
+                            }
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function generateOpportunitiesSection(opportunities) {
+    return `
+        <div class="tree-section">
+            <div class="section-title">
+                🎯 Strategic Opportunities
+            </div>
+            <div class="opportunities-grid">
+                ${opportunities.slice(0, 6).map(opp => `
+                    <div class="opportunity-card" onclick="expandOpportunityCard(this)">
+                        <div class="opportunity-score">${Math.round(opp.score || 0)}</div>
+                        <div class="opportunity-title">${opp.title}</div>
+                        <div class="opportunity-type">${(opp.type || '').replace(/_/g, ' ').toUpperCase()}</div>
+                        <div class="opportunity-timing">
+                            Optimal timing: ${new Date(opp.optimal_timing).toLocaleDateString()}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// Interactive functions
+function initializeTreeVisualizationInteractions() {
+    // Add CSS for the enhanced tree visualization
+    if (!document.getElementById('tree-visualization-styles')) {
+        const style = document.createElement('style');
+        style.id = 'tree-visualization-styles';
+        style.textContent = getTreeVisualizationStyles();
+        document.head.appendChild(style);
+    }
+}
+
+function expandTopicCard(card) {
+    const actions = card.querySelector('.topic-actions');
+    if (actions) {
+        actions.style.display = actions.style.display === 'none' ? 'flex' : 'none';
+    }
+    
+    card.classList.toggle('expanded');
+}
+
+function expandContactCard(card) {
+    const actions = card.querySelector('.contact-actions');
+    if (actions) {
+        actions.style.display = actions.style.display === 'none' ? 'flex' : 'none';
+    }
+    
+    card.classList.toggle('expanded');
+}
+
+function expandDomainCard(card) {
+    const actions = card.querySelector('.domain-actions');
+    if (actions) {
+        actions.style.display = actions.style.display === 'none' ? 'flex' : 'none';
+    }
+    
+    card.classList.toggle('expanded');
+}
+
+function expandOpportunityCard(card) {
+    card.classList.toggle('expanded');
+}
+
+async function drillDownTopic(topicName, event) {
+    event?.stopPropagation();
+    
+    try {
+        const response = await fetch(`/api/intelligence/topics/${encodeURIComponent(topicName)}/content`);
+        if (response.ok) {
+            const content = await response.json();
+            showContentDrillDown('Topic: ' + topicName, content);
+        } else {
+            showMessage('Topic content not available', 'info');
+        }
+    } catch (error) {
+        console.error('Error fetching topic content:', error);
+        showMessage('Error loading topic content', 'error');
+    }
+}
+
+async function drillDownContact(contactEmail, event) {
+    event?.stopPropagation();
+    
+    try {
+        const response = await fetch(`/api/intelligence/contacts/${encodeURIComponent(contactEmail)}/history`);
+        if (response.ok) {
+            const history = await response.json();
+            showContentDrillDown('Contact: ' + contactEmail, history);
+        } else {
+            showMessage('Contact history not available', 'info');
+        }
+    } catch (error) {
+        console.error('Error fetching contact history:', error);
+        showMessage('Error loading contact history', 'error');
+    }
+}
+
+async function drillDownDomain(domainName, event) {
+    event?.stopPropagation();
+    
+    try {
+        const response = await fetch(`/api/intelligence/domains/${encodeURIComponent(domainName)}/details`);
+        if (response.ok) {
+            const details = await response.json();
+            showContentDrillDown('Domain: ' + domainName, details);
+        } else {
+            showMessage('Domain details not available', 'info');
+        }
+    } catch (error) {
+        console.error('Error fetching domain details:', error);
+        showMessage('Error loading domain details', 'error');
+    }
+}
+
+function showContentDrillDown(title, content) {
+    const modal = document.getElementById('contentModal');
+    const modalContent = document.getElementById('modalContent');
+    
+    modalContent.innerHTML = `
+        <div class="drill-down-content">
+            <h3>${title}</h3>
+            <div class="content-details">
+                <pre>${JSON.stringify(content, null, 2)}</pre>
+            </div>
+            <button onclick="closeModal()" class="btn btn-secondary">Close</button>
+        </div>
+    `;
+    
+    modal.style.display = 'block';
+}
+
+function showRelatedContent(topicName, event) {
+    event?.stopPropagation();
+    showMessage(`Related content for ${topicName} - feature coming soon!`, 'info');
+}
+
+function showContactHistory(contactEmail, event) {
+    event?.stopPropagation();
+    showMessage(`Communication history for ${contactEmail} - feature coming soon!`, 'info');
+}
+
+function downloadTreeData() {
+    fetchCurrentKnowledgeTree().then(tree => {
+        if (tree) {
+            const dataStr = JSON.stringify(tree, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `knowledge-tree-${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+    });
+}
+
+function getTreeVisualizationStyles() {
+    return `
+        .enhanced-tree-visualization {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .tree-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .tree-header h2 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+        
+        .tree-meta {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .tree-stats-header {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 40px;
+            flex-wrap: wrap;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 12px;
+            color: white;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 1.8rem;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .tree-section {
+            margin-bottom: 40px;
+        }
+        
+        .section-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .topic-grid, .contact-grid, .domain-grid, .opportunities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .topic-card, .contact-card, .domain-card, .opportunity-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 5px solid #007bff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .topic-card:hover, .contact-card:hover, .domain-card:hover, .opportunity-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .topic-card.expanded, .contact-card.expanded, .domain-card.expanded, .opportunity-card.expanded {
+            transform: scale(1.02);
+        }
+        
+        .topic-title, .contact-name, .domain-name, .opportunity-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .topic-icon {
+            font-size: 1.3rem;
+        }
+        
+        .relevance-badge {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .relevance-high {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .relevance-medium {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .relevance-low {
+            background: #28a745;
+            color: white;
+        }
+        
+        .key-points h4, .participants h4, .contact-topics {
+            font-size: 0.9rem;
+            color: #495057;
+            margin-bottom: 8px;
+        }
+        
+        .point-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .point-list li {
+            padding: 3px 0;
+            padding-left: 15px;
+            position: relative;
+            font-size: 0.9rem;
+        }
+        
+        .point-list li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #007bff;
+            font-weight: bold;
+        }
+        
+        .participant-tags, .contact-topics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        
+        .participant-tag, .topic-tag {
+            background: #007bff;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+        }
+        
+        .contact-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        
+        .contact-email {
+            font-size: 0.85rem;
+            color: #666;
+        }
+        
+        .contact-company {
+            font-size: 0.8rem;
+            color: #888;
+            font-style: italic;
+        }
+        
+        .engagement-score {
+            background: #28a745;
+            color: white;
+            padding: 6px 10px;
+            border-radius: 50%;
+            font-size: 0.8rem;
+            font-weight: bold;
+            min-width: 35px;
+            text-align: center;
+        }
+        
+        .contact-context, .topic-summary {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            color: #495057;
+            margin-bottom: 10px;
+        }
+        
+        .timeline {
+            position: relative;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .timeline:before {
+            content: '';
+            position: absolute;
+            left: 20px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #007bff;
+        }
+        
+        .timeline-item {
+            position: relative;
+            margin-bottom: 20px;
+            padding-left: 50px;
+        }
+        
+        .timeline-item:before {
+            content: '';
+            position: absolute;
+            left: 14px;
+            top: 5px;
+            width: 12px;
+            height: 12px;
+            background: #007bff;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 0 2px #007bff;
+        }
+        
+        .timeline-date {
+            font-weight: bold;
+            color: #007bff;
+            font-size: 0.9rem;
+        }
+        
+        .timeline-event {
+            margin-top: 5px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+        
+        .domain-topics {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .opportunity-score {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #28a745;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        .opportunity-type {
+            font-size: 0.8rem;
+            color: #666;
+            text-transform: uppercase;
+            margin: 5px 0;
+        }
+        
+        .opportunity-timing {
+            font-size: 0.85rem;
+            color: #888;
+        }
+        
+        .topic-actions, .contact-actions, .domain-actions {
+            display: none;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        
+        .drill-down-btn, .related-content-btn, .history-btn {
+            padding: 6px 12px;
+            border: 1px solid #007bff;
+            background: #007bff;
+            color: white;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .drill-down-btn:hover, .related-content-btn:hover, .history-btn:hover {
+            background: #0056b3;
+            border-color: #0056b3;
+        }
+        
+        .related-content-btn {
+            background: transparent;
+            color: #007bff;
+        }
+        
+        .related-content-btn:hover {
+            background: #007bff;
+            color: white;
+        }
+        
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .insight-category {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-left: 4px solid #28a745;
+        }
+        
+        .insight-category h4 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1rem;
+        }
+        
+        .insight-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+        
+        .drill-down-content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .drill-down-content h3 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        .content-details {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .content-details pre {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            margin: 0;
+        }
+        
+        @media (max-width: 768px) {
+            .topic-grid, .contact-grid, .domain-grid, .opportunities-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .tree-stats-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .enhanced-tree-visualization {
+                padding: 10px;
+            }
+        }
+    `;
+}
+
+// ... existing code ...
 
 async function startFullPipeline() {
+    console.log('🚀 startFullPipeline() called');
+    
     // Check authentication first
     const isAuthenticated = await checkAuthentication();
+    console.log('🔐 Authentication check result:', isAuthenticated);
+    
     if (!isAuthenticated) {
+        console.log('❌ Authentication failed');
         showMessage('Authentication required. Please log in to run pipeline operations.', 'error');
         return;
     }
     
     // Check if anything is running
+    console.log('⚙️ Current pipeline state:', currentPipelineState);
     if (currentPipelineState.isRunning) {
+        console.log('⚠️ Pipeline already running');
         showMessage('Another operation is already running!', 'warning');
         return;
     }
     
+    console.log('✅ Starting pipeline from first step');
     // Start from the first step (contacts)
-    await startFromStep('contacts', 1);
+    const firstStepId = PIPELINE_STEPS[0].id;
+    console.log('🎯 First step ID:', firstStepId);
+    await startFromStep(firstStepId, 1);
 }
 
-async function completePipeline() {
-    // Mark pipeline as completed
-    currentPipelineState.isRunning = false;
-    
-    // Re-enable all buttons
-    updateStartFromButtonStates();
-    document.getElementById('startPipeline').disabled = false;
-    
-    // Show completion message
-    showMessage('🎉 Intelligence pipeline completed successfully!', 'success');
-    
-    // Show results section
-    document.getElementById('resultsSection').style.display = 'block';
-    
-    console.log('✅ Pipeline completed successfully');
+async function startFromStep(stepId, stepNumber) {
+    // ... existing code ...
 }
 
-function createDownloadLink(stepId, result) {
-    // Create a downloadable JSON blob for the result
-    const dataBlob = new Blob([JSON.stringify(result, null, 2)], {
-        type: 'application/json'
-    });
-    
-    // Store the blob URL for download
-    if (!window.stepDownloadLinks) {
-        window.stepDownloadLinks = {};
-    }
-    
-    window.stepDownloadLinks[stepId] = URL.createObjectURL(dataBlob);
-    
-    console.log(`✅ Download link created for step ${stepId}`);
+async function handleRunIndividualStep(stepId) {
+    // Simple wrapper that calls the existing runIndividualStep function
+    await runIndividualStep(stepId);
 }
 
-// Add a simple test function to verify modal functionality
+async function handleInspectStepResults(stepId) {
+    // Simple wrapper that calls the existing inspectStepResults function
+    await inspectStepResults(stepId);
+}
+
+async function handleViewStepResults(stepId) {
+    // Simple wrapper that calls the existing viewStepResults function
+    await viewStepResults(stepId);
+}
+
 function testModal() {
-    showModal(`
-        <div style="text-align: center; padding: 20px;">
-            <h3 style="color: #28a745;">✅ Modal Test</h3>
-            <p>If you can see this modal and the close button works, the modal system is functioning correctly!</p>
-            <button onclick="closeModal()" style="
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-                background: #007bff;
-                color: white;
-                cursor: pointer;
-            ">Close Test Modal</button>
-        </div>
-    `);
-    console.log('🧪 Test modal displayed');
+    console.log('🧪 testModal() called - button click detected!');
+    // Simple test function for the test modal button
+    showMessage('🧪 Test button clicked! All functions are working.', 'success');
 }
 
-// Enhanced button click handlers for step results
-function handleViewStepResults(stepId) {
-    console.log(`🖱️ View results clicked for step: ${stepId}`);
-    viewStepResults(stepId).catch(error => {
-        console.error(`❌ Error in handleViewStepResults:`, error);
-        showMessage(`❌ Error viewing results: ${error.message}`, 'error');
-    });
+function stopPipeline() {
+    // Stop the current running pipeline
+    if (currentPipelineState.isRunning) {
+        currentPipelineState.isRunning = false;
+        updateStartFromButtonStates();
+        document.getElementById('startPipeline').disabled = false;
+        showMessage('⏹️ Pipeline stopped by user', 'warning');
+    } else {
+        showMessage('No pipeline is currently running', 'info');
+    }
 }
 
-function handleInspectStepResults(stepId) {
-    console.log(`🖱️ Inspect results clicked for step: ${stepId}`);
-    inspectStepResults(stepId).catch(error => {
-        console.error(`❌ Error in handleInspectStepResults:`, error);
-        showMessage(`❌ Error inspecting results: ${error.message}`, 'error');
-    });
+function downloadAllResults() {
+    // Download all pipeline results as JSON
+    if (currentPipelineState.stepResults && Object.keys(currentPipelineState.stepResults).length > 0) {
+        const dataStr = JSON.stringify(currentPipelineState.stepResults, null, 2);
+        const dataBlob = new Blob([dataStr], {type: 'application/json'});
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `pipeline-results-${new Date().toISOString().slice(0,10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showMessage('📥 Results downloaded successfully', 'success');
+    } else {
+        showMessage('No results available to download', 'warning');
+    }
 }
 
-function handleRunIndividualStep(stepId) {
-    console.log(`🖱️ Run individual step clicked for step: ${stepId}`);
-    runIndividualStep(stepId).catch(error => {
-        console.error(`❌ Error in handleRunIndividualStep:`, error);
-        showMessage(`❌ Error running step: ${error.message}`, 'error');
-    });
+function resetPipeline() {
+    // Reset the pipeline state to run again
+    currentPipelineState = {
+        isRunning: false,
+        currentStep: 0,
+        totalSteps: 0,
+        stepResults: {},
+        finalKnowledgeTree: null,
+        daysBack: 30
+    };
+    
+    document.getElementById('progressSection').style.display = 'none';
+    document.getElementById('resultsSection').style.display = 'none';
+    document.getElementById('startPipeline').disabled = false;
+    updateStartFromButtonStates();
+    
+    showMessage('🔄 Pipeline reset - ready to run again', 'info');
 }
 
-function handleDownloadStepResult(stepId) {
-    console.log(`🖱️ Download result clicked for step: ${stepId}`);
-    downloadStepResult(stepId).catch(error => {
-        console.error(`❌ Error in handleDownloadStepResult:`, error);
-        showMessage(`❌ Error downloading result: ${error.message}`, 'error');
-    });
+// Initialize the dashboard when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 DOM loaded, initializing dashboard...');
+    initializeDashboard();
+});
+
+// Fallback initialization in case DOMContentLoaded already fired
+if (document.readyState === 'loading') {
+    console.log('📖 Document still loading, waiting for DOMContentLoaded...');
+} else {
+    console.log('📖 Document already loaded, initializing immediately...');
+    initializeDashboard();
 }
+
+// Additional fallback with window.onload
+window.addEventListener('load', function() {
+    const app = document.getElementById('app');
+    if (app && app.innerHTML.includes('Loading Strategic Intelligence Dashboard')) {
+        console.log('🔄 Dashboard not initialized yet, trying again...');
+        initializeDashboard();
+    }
+});
 

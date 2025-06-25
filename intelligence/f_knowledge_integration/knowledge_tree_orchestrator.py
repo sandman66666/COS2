@@ -3,6 +3,7 @@ Knowledge Tree Orchestrator - Two-Phase Architecture
 ====================================================
 Phase 1: Claude Content Consolidation & Tree Structure Building (Comprehensive, Intelligent)
 Phase 2: Strategic Intelligence Analysis (Expensive, High-Quality, Targeted)
+Phase 3: Strategic Opportunity Scoring & Prioritization (Expensive, High-Quality, Targeted)
 
 Implements the complete two-phase architecture as specified in flow.txt
 """
@@ -16,6 +17,7 @@ import anthropic
 
 from intelligence.c_content_processing.claude_content_consolidator import ClaudeContentConsolidator, ContentItem, ContentType
 from intelligence.e_strategic_analysis.strategic_analyzer import StrategicAnalysisSystem, StrategicInsight
+from intelligence.e_strategic_analysis.opportunity_scorer import OpportunityScorer
 from storage.storage_manager import StorageManager
 
 class KnowledgeTreeOrchestrator:
@@ -25,6 +27,9 @@ class KnowledgeTreeOrchestrator:
         
         # Phase 2: Strategic Intelligence Analysis (works on organized tree)
         self.strategic_analyzer = StrategicAnalysisSystem(claude_api_key)
+        
+        # Phase 3: Strategic Opportunity Scoring (prioritizes opportunities)
+        self.opportunity_scorer = OpportunityScorer(claude_api_key)
         
         self.storage_manager = StorageManager()
 
@@ -123,13 +128,49 @@ class KnowledgeTreeOrchestrator:
         print("=" * 80)
         
         # Combine Phase 1 and Phase 2 results into comprehensive knowledge tree
-        comprehensive_tree = self._synthesize_two_phase_results(
+        comprehensive_tree = self._synthesize_three_phase_results(
             user_id=user_id,
             user_email=user_email,
             knowledge_tree=knowledge_tree,
             strategic_analysis=strategic_analysis,
+            opportunities=[],  # Will be populated in Phase 3
             phase1_duration=phase1_duration,
             phase2_duration=phase2_duration,
+            phase3_duration=0,  # Will be updated after Phase 3
+            total_content_items=len(all_content_items)
+        )
+        
+        # =============================================================================
+        # PHASE 3: STRATEGIC OPPORTUNITY SCORING & PRIORITIZATION
+        # =============================================================================
+        print("\n" + "=" * 80)
+        print("🎯 PHASE 3: STRATEGIC OPPORTUNITY SCORING & PRIORITIZATION")
+        print("=" * 80)
+        print("🔍 Extracting and scoring strategic opportunities...")
+        
+        phase3_start = datetime.now()
+        
+        # Extract and score opportunities from strategic analysis using comprehensive tree
+        opportunities = await self.opportunity_scorer.extract_opportunities_from_knowledge_tree(comprehensive_tree)
+        opportunity_summary = self.opportunity_scorer.get_opportunity_summary(opportunities)
+        
+        phase3_duration = (datetime.now() - phase3_start).total_seconds()
+        print(f"\n✅ PHASE 3 COMPLETED in {phase3_duration:.2f} seconds")
+        print(f"🎯 Identified {len(opportunities)} strategic opportunities")
+        if opportunities:
+            print(f"📊 Top opportunity score: {max(opp.score for opp in opportunities):.1f}/100")
+            print(f"📈 Average opportunity score: {opportunity_summary['average_score']:.1f}/100")
+        
+        # Update comprehensive tree with Phase 3 results
+        comprehensive_tree = self._synthesize_three_phase_results(
+            user_id=user_id,
+            user_email=user_email,
+            knowledge_tree=knowledge_tree,
+            strategic_analysis=strategic_analysis,
+            opportunities=opportunities,
+            phase1_duration=phase1_duration,
+            phase2_duration=phase2_duration,
+            phase3_duration=phase3_duration,
             total_content_items=len(all_content_items)
         )
         
@@ -137,21 +178,23 @@ class KnowledgeTreeOrchestrator:
         success = await self.storage_manager.store_knowledge_tree(
             user_id=user_id,
             tree_data=comprehensive_tree,
-            analysis_type="two_phase_claude_consolidation_v1"
+            analysis_type="three_phase_claude_consolidation_v1"
         )
         
         if not success:
             raise Exception("Failed to store knowledge tree")
         
-        total_duration = phase1_duration + phase2_duration
-        print(f"\n🎉 TWO-PHASE KNOWLEDGE TREE BUILD COMPLETE!")
+        total_duration = phase1_duration + phase2_duration + phase3_duration
+        print(f"\n🎉 THREE-PHASE KNOWLEDGE TREE BUILD COMPLETE!")
         print(f"⏱️  Phase 1 (Claude Consolidation): {phase1_duration:.2f}s")
         print(f"⏱️  Phase 2 (Strategic Analysis): {phase2_duration:.2f}s")
+        print(f"⏱️  Phase 3 (Opportunity Scoring): {phase3_duration:.2f}s")
         print(f"⏱️  Total Processing Time: {total_duration:.2f}s")
         print(f"📊 Content Sources Processed: {len(knowledge_tree.content_sources)}")
         print(f"🏷️  Topics/Branches Identified: {len(knowledge_tree.topics)}")
         print(f"🤝 Relationships Mapped: {len(knowledge_tree.relationships)}")
         print(f"🎯 Strategic Insights: {strategic_analysis['total_insights']}")
+        print(f"🚀 Strategic Opportunities: {len(opportunities)}")
         
         return {
             'success': True,
@@ -166,17 +209,20 @@ class KnowledgeTreeOrchestrator:
                 'topics_identified': len(knowledge_tree.topics),
                 'relationships_mapped': len(knowledge_tree.relationships),
                 'strategic_insights_generated': strategic_analysis['total_insights'],
+                'opportunities_identified': len(opportunities),
                 'phase1_duration_seconds': phase1_duration,
                 'phase2_duration_seconds': phase2_duration,
+                'phase3_duration_seconds': phase3_duration,
                 'total_duration_seconds': total_duration,
-                'architecture': 'two_phase_claude_consolidation'
+                'architecture': 'three_phase_claude_consolidation_plus_opportunity_scoring'
             },
             'architecture_metadata': {
                 'phase1_components': ['claude_content_consolidation', 'comprehensive_tree_building', 'topic_branch_structure'],
                 'phase2_components': ['business_development_agent', 'competitive_intelligence_agent', 
                                     'network_analysis_agent', 'opportunity_matrix_agent', 'strategic_synthesizer'],
-                'model_used': 'claude-opus-4-20250514',
-                'processing_method': 'claude_consolidation_plus_strategic_analysis',
+                'phase3_components': ['opportunity_extraction', 'strategic_scoring', 'priority_ranking'],
+                'model_used': 'claude-3-5-sonnet-20241022',
+                'processing_method': 'claude_consolidation_plus_strategic_analysis_plus_opportunity_scoring',
                 'content_types_supported': ['email', 'document', 'slack', 'task', 'meeting', 'note'],
                 'chunking_strategy': 'intelligent_batching_or_all_at_once'
             }
@@ -318,23 +364,27 @@ class KnowledgeTreeOrchestrator:
         
         return serializable_analysis
 
-    def _synthesize_two_phase_results(self, user_id: int, user_email: str, 
-                                    knowledge_tree, strategic_analysis: Dict,
-                                    phase1_duration: float, phase2_duration: float,
-                                    total_content_items: int) -> Dict[str, Any]:
+    def _synthesize_three_phase_results(self, user_id: int, user_email: str, 
+                                      knowledge_tree, strategic_analysis: Dict,
+                                      opportunities: List,
+                                      phase1_duration: float, phase2_duration: float, phase3_duration: float,
+                                      total_content_items: int) -> Dict[str, Any]:
         """
-        Synthesize Phase 1 (Claude Consolidation) and Phase 2 (Strategic Analysis) results
+        Synthesize Phase 1 (Claude Consolidation), Phase 2 (Strategic Analysis), and Phase 3 (Opportunity Scoring) results
         """
         # Convert StrategicInsight objects to JSON-serializable dictionaries
         serializable_strategic_analysis = self._convert_strategic_insights_to_dict(strategic_analysis)
         
+        # Convert opportunities to JSON-serializable format
+        serializable_opportunities = [asdict(opp) for opp in opportunities]
+        
         return {
             # Tree metadata
-            "tree_type": "two_phase_claude_consolidation_v1",
+            "tree_type": "three_phase_claude_consolidation_v1",
             "user_id": user_id,
             "user_email": user_email,
             "build_timestamp": datetime.now().isoformat(),
-            "architecture": "claude_consolidation_plus_strategic_analysis",
+            "architecture": "claude_consolidation_plus_strategic_analysis_plus_opportunity_scoring",
             
             # Phase 1 Results: Claude Content Consolidation & Tree Structure
             "phase1_claude_tree": {
@@ -349,16 +399,26 @@ class KnowledgeTreeOrchestrator:
             # Phase 2 Results: Strategic Intelligence Analysis (now JSON serializable)
             "phase2_strategic_analysis": serializable_strategic_analysis,
             
+            # Phase 3 Results: Strategic Opportunity Scoring
+            "phase3_opportunity_analysis": {
+                "opportunities": serializable_opportunities,
+                "opportunity_summary": self.opportunity_scorer.get_opportunity_summary(opportunities),
+                "top_opportunities": [asdict(opp) for opp in self.opportunity_scorer.get_top_opportunities(opportunities, 5)],
+                "generated_at": datetime.now().isoformat()
+            },
+            
             # Performance metrics
             "processing_performance": {
                 "phase1_duration_seconds": phase1_duration,
                 "phase2_duration_seconds": phase2_duration,
-                "total_duration_seconds": phase1_duration + phase2_duration,
+                "phase3_duration_seconds": phase3_duration,
+                "total_duration_seconds": phase1_duration + phase2_duration + phase3_duration,
                 "content_processed": total_content_items,
                 "content_sources_processed": len(knowledge_tree.content_sources),
                 "topics_identified": len(knowledge_tree.topics),
                 "relationships_mapped": len(knowledge_tree.relationships),
-                "strategic_insights": serializable_strategic_analysis.get('total_insights', 0)
+                "strategic_insights": serializable_strategic_analysis.get('total_insights', 0),
+                "opportunities_identified": len(opportunities)
             },
             
             # Legacy compatibility for existing APIs
@@ -368,6 +428,7 @@ class KnowledgeTreeOrchestrator:
             "timeline": knowledge_tree.timeline,
             "strategic_intelligence": serializable_strategic_analysis.get('agent_insights', {}),
             "cross_domain_synthesis": serializable_strategic_analysis.get('cross_domain_synthesis', []),
+            "strategic_opportunities": serializable_opportunities,
             
             # New comprehensive structure
             "comprehensive_knowledge_tree": {
@@ -376,6 +437,7 @@ class KnowledgeTreeOrchestrator:
                 "business_domains": dict(knowledge_tree.business_domains),
                 "timeline": knowledge_tree.timeline,
                 "strategic_insights": serializable_strategic_analysis.get('agent_insights', {}),
+                "strategic_opportunities": serializable_opportunities,
                 "content_sources": dict(knowledge_tree.content_sources)
             }
         }

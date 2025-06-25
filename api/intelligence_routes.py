@@ -8,6 +8,8 @@ import asyncio
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, Request
 from pydantic import BaseModel
+from datetime import datetime
+import os
 
 from auth.auth_manager import get_current_user
 from models.user import User
@@ -16,6 +18,8 @@ from intelligence.a_core.claude_analysis import KnowledgeTreeBuilder
 from intelligence.f_knowledge_integration.knowledge_tree.multidimensional_matrix import MultidimensionalKnowledgeMatrix
 from storage.storage_manager import get_storage_manager
 from intelligence.e_strategic_analysis.ceo_strategic_intelligence_system import CEOStrategicIntelligenceSystem
+from intelligence.e_strategic_analysis.opportunity_scorer import OpportunityScorer
+from dataclasses import asdict
 
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
 
@@ -751,3 +755,380 @@ async def get_ceo_intelligence_status():
     except Exception as e:
         logger.error(f"Error getting CEO intelligence status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get intelligence status: {str(e)}")
+
+@router.get("/opportunities/strategic")
+async def get_strategic_opportunities(
+    user: User = Depends(get_current_user)
+):
+    """
+    Get strategic opportunities scored and prioritized from the knowledge tree.
+    """
+    try:
+        storage_manager = await get_storage_manager()
+        knowledge_tree = await storage_manager.get_knowledge_tree(user_id=user.id)
+        
+        if not knowledge_tree:
+            return {
+                "success": True,
+                "message": "No knowledge analysis found",
+                "opportunities": []
+            }
+        
+        # Extract opportunity analysis from Phase 3
+        phase3_data = knowledge_tree.get("phase3_opportunity_analysis", {})
+        
+        if not phase3_data:
+            # If no Phase 3 data, try to extract from strategic intelligence
+            claude_api_key = os.getenv('ANTHROPIC_API_KEY')
+            if not claude_api_key:
+                return {
+                    "success": False,
+                    "error": "Claude API key not configured"
+                }
+            
+            scorer = OpportunityScorer(claude_api_key)
+            opportunities = await scorer.extract_opportunities_from_knowledge_tree(knowledge_tree)
+            opportunity_summary = scorer.get_opportunity_summary(opportunities)
+            
+            phase3_data = {
+                "opportunities": [asdict(opp) for opp in opportunities],
+                "opportunity_summary": opportunity_summary,
+                "top_opportunities": [asdict(opp) for opp in scorer.get_top_opportunities(opportunities, 5)]
+            }
+        
+        return {
+            "success": True,
+            "opportunities": phase3_data.get("opportunities", []),
+            "opportunity_summary": phase3_data.get("opportunity_summary", {}),
+            "top_opportunities": phase3_data.get("top_opportunities", []),
+            "generated_at": phase3_data.get("generated_at", datetime.utcnow().isoformat())
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting strategic opportunities: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/relationships/decay-risks")
+async def get_relationship_decay_risks(
+    user: User = Depends(get_current_user)
+):
+    """
+    Get relationships at risk of decay with proactive maintenance recommendations.
+    """
+    try:
+        from intelligence.g_realtime_updates.relationship_decay_predictor import RelationshipDecayPredictor
+        from dataclasses import asdict
+        
+        storage_manager = await get_storage_manager()
+        predictor = RelationshipDecayPredictor(storage_manager)
+        
+        # Analyze relationships for decay risks
+        decay_risks = await predictor.analyze_relationships_for_user(user.id)
+        decay_summary = predictor.get_decay_summary(decay_risks)
+        
+        # Convert DecayRisk objects to dictionaries
+        serializable_risks = [asdict(risk) for risk in decay_risks]
+        
+        # Group risks by level for easier consumption
+        risks_by_level = {
+            'critical': [],
+            'high': [],
+            'medium': []
+        }
+        
+        for risk_data in serializable_risks:
+            level = risk_data['risk_level']
+            if level in risks_by_level:
+                risks_by_level[level].append(risk_data)
+        
+        return {
+            "success": True,
+            "decay_risks": serializable_risks,
+            "risks_by_level": risks_by_level,
+            "summary": decay_summary,
+            "total_relationships_analyzed": decay_summary.get('total_at_risk', 0),
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing relationship decay risks: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/opportunities/by-type/{opportunity_type}")
+async def get_opportunities_by_type(
+    opportunity_type: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get strategic opportunities filtered by type.
+    """
+    try:
+        storage_manager = await get_storage_manager()
+        knowledge_tree = await storage_manager.get_knowledge_tree(user_id=user.id)
+        
+        if not knowledge_tree:
+            return {
+                "success": True,
+                "message": "No knowledge analysis found",
+                "opportunities": []
+            }
+        
+        # Extract opportunities from Phase 3
+        phase3_data = knowledge_tree.get("phase3_opportunity_analysis", {})
+        all_opportunities = phase3_data.get("opportunities", [])
+        
+        # Filter by type
+        filtered_opportunities = [
+            opp for opp in all_opportunities 
+            if opp.get('type') == opportunity_type
+        ]
+        
+        # Sort by score
+        filtered_opportunities.sort(key=lambda x: x.get('score', 0), reverse=True)
+        
+        return {
+            "success": True,
+            "opportunity_type": opportunity_type,
+            "opportunities": filtered_opportunities,
+            "count": len(filtered_opportunities),
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting opportunities by type: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/analytics/enhancement-summary")
+async def get_enhancement_summary(
+    user: User = Depends(get_current_user)
+):
+    """
+    Get summary of all intelligence enhancements (opportunities + relationship health).
+    """
+    try:
+        storage_manager = await get_storage_manager()
+        
+        # Get strategic opportunities
+        knowledge_tree = await storage_manager.get_knowledge_tree(user_id=user.id)
+        opportunity_count = 0
+        top_opportunity_score = 0
+        
+        if knowledge_tree:
+            phase3_data = knowledge_tree.get("phase3_opportunity_analysis", {})
+            opportunities = phase3_data.get("opportunities", [])
+            opportunity_count = len(opportunities)
+            if opportunities:
+                top_opportunity_score = max(opp.get('score', 0) for opp in opportunities)
+        
+        # Get relationship decay risks
+        from intelligence.g_realtime_updates.relationship_decay_predictor import RelationshipDecayPredictor
+        
+        predictor = RelationshipDecayPredictor(storage_manager)
+        decay_risks = await predictor.analyze_relationships_for_user(user.id)
+        decay_summary = predictor.get_decay_summary(decay_risks)
+        
+        return {
+            "success": True,
+            "enhancement_summary": {
+                "strategic_opportunities": {
+                    "total_identified": opportunity_count,
+                    "top_opportunity_score": round(top_opportunity_score, 1),
+                    "has_high_value_opportunities": top_opportunity_score >= 70
+                },
+                "relationship_health": {
+                    "total_at_risk": decay_summary.get('total_at_risk', 0),
+                    "critical_risks": decay_summary.get('by_risk_level', {}).get('critical', 0),
+                    "high_risks": decay_summary.get('by_risk_level', {}).get('high', 0),
+                    "average_days_until_dormant": decay_summary.get('average_days_until_dormant', 0)
+                },
+                "architecture_status": {
+                    "phase1_enabled": True,  # Claude Content Consolidation
+                    "phase2_enabled": True,  # Strategic Analysis
+                    "phase3_enabled": True,  # Opportunity Scoring
+                    "relationship_monitoring": True,  # Decay Prediction
+                    "system_version": "three_phase_plus_enhancements_v1"
+                }
+            },
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting enhancement summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/topics/{topic_name}/content")
+async def get_topic_content(
+    topic_name: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get detailed content for a specific topic (drill-down functionality).
+    """
+    try:
+        storage_manager = await get_storage_manager()
+        knowledge_tree = await storage_manager.get_knowledge_tree(user_id=user.id)
+        
+        if not knowledge_tree:
+            raise HTTPException(status_code=404, detail="Knowledge tree not found")
+        
+        # Extract topic data from Phase 1
+        phase1 = knowledge_tree.get("phase1_claude_tree", {})
+        topics = phase1.get("topics", knowledge_tree.get("topics", {}))
+        
+        if topic_name not in topics:
+            raise HTTPException(status_code=404, detail=f"Topic '{topic_name}' not found")
+        
+        topic_data = topics[topic_name]
+        
+        # Get related emails and content
+        emails = await storage_manager.get_emails_for_user(user.id, limit=1000)
+        related_emails = []
+        
+        # Find emails related to this topic
+        search_terms = [topic_name.lower().replace('_', ' ')]
+        if topic_data.get('key_points'):
+            search_terms.extend([point.lower() for point in topic_data['key_points'][:3]])
+        
+        for email in emails:
+            email_content = (email.get('subject', '') + ' ' + email.get('body', '')).lower()
+            if any(term in email_content for term in search_terms):
+                related_emails.append({
+                    'subject': email.get('subject', ''),
+                    'sender': email.get('sender', ''),
+                    'date': email.get('timestamp', ''),
+                    'snippet': email_content[:200] + '...' if len(email_content) > 200 else email_content
+                })
+        
+        return {
+            "success": True,
+            "topic_name": topic_name,
+            "topic_data": topic_data,
+            "related_emails": related_emails[:10],  # Limit to 10 most relevant
+            "total_related_emails": len(related_emails)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting topic content: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/contacts/{contact_email}/history")
+async def get_contact_history(
+    contact_email: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get communication history for a specific contact (drill-down functionality).
+    """
+    try:
+        storage_manager = await get_storage_manager()
+        
+        # Get emails for this contact
+        emails = await storage_manager.get_emails_for_user(user.id, limit=1000)
+        contact_emails = []
+        
+        for email in emails:
+            if (email.get('sender', '').lower() == contact_email.lower() or 
+                contact_email.lower() in (email.get('recipient', '') + ' ' + email.get('cc', '')).lower()):
+                contact_emails.append({
+                    'subject': email.get('subject', ''),
+                    'sender': email.get('sender', ''),
+                    'recipient': email.get('recipient', ''),
+                    'date': email.get('timestamp', ''),
+                    'body_snippet': email.get('body', '')[:300] + '...' if len(email.get('body', '')) > 300 else email.get('body', ''),
+                    'direction': 'received' if email.get('sender', '').lower() == contact_email.lower() else 'sent'
+                })
+        
+        # Sort by date (most recent first)
+        contact_emails.sort(key=lambda x: x['date'], reverse=True)
+        
+        # Get relationship data from knowledge tree
+        knowledge_tree = await storage_manager.get_knowledge_tree(user_id=user.id)
+        relationship_data = {}
+        
+        if knowledge_tree:
+            phase1 = knowledge_tree.get("phase1_claude_tree", {})
+            relationships = phase1.get("relationships", knowledge_tree.get("relationships", {}))
+            relationship_data = relationships.get(contact_email, {})
+        
+        # Calculate communication stats
+        total_emails = len(contact_emails)
+        sent_count = len([e for e in contact_emails if e['direction'] == 'sent'])
+        received_count = len([e for e in contact_emails if e['direction'] == 'received'])
+        
+        return {
+            "success": True,
+            "contact_email": contact_email,
+            "relationship_data": relationship_data,
+            "communication_history": contact_emails[:20],  # Limit to 20 most recent
+            "stats": {
+                "total_emails": total_emails,
+                "sent_count": sent_count,
+                "received_count": received_count,
+                "response_rate": sent_count / received_count if received_count > 0 else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting contact history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/domains/{domain_name}/details")
+async def get_domain_details(
+    domain_name: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get detailed information for a specific business domain (drill-down functionality).
+    """
+    try:
+        storage_manager = await get_storage_manager()
+        knowledge_tree = await storage_manager.get_knowledge_tree(user_id=user.id)
+        
+        if not knowledge_tree:
+            raise HTTPException(status_code=404, detail="Knowledge tree not found")
+        
+        # Extract domain data from Phase 1
+        phase1 = knowledge_tree.get("phase1_claude_tree", {})
+        domains = phase1.get("business_domains", knowledge_tree.get("business_domains", {}))
+        
+        if domain_name not in domains:
+            raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found")
+        
+        domain_data = domains[domain_name]
+        
+        # Get related topics
+        topics = phase1.get("topics", knowledge_tree.get("topics", {}))
+        related_topics = {}
+        
+        # Find topics related to this domain
+        domain_keywords = domain_name.lower().replace('_', ' ').split()
+        
+        for topic_name, topic_data in topics.items():
+            topic_text = (topic_name + ' ' + str(topic_data.get('business_context', ''))).lower()
+            if any(keyword in topic_text for keyword in domain_keywords):
+                related_topics[topic_name] = topic_data
+        
+        # Get related relationships
+        relationships = phase1.get("relationships", knowledge_tree.get("relationships", {}))
+        related_contacts = {}
+        
+        for contact_email, contact_data in relationships.items():
+            contact_topics = contact_data.get('topics_involved', [])
+            if any(topic in related_topics for topic in contact_topics):
+                related_contacts[contact_email] = contact_data
+        
+        return {
+            "success": True,
+            "domain_name": domain_name,
+            "domain_data": domain_data,
+            "related_topics": related_topics,
+            "related_contacts": related_contacts,
+            "stats": {
+                "related_topics_count": len(related_topics),
+                "related_contacts_count": len(related_contacts)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting domain details: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

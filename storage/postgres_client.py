@@ -470,3 +470,56 @@ class PostgresClient(BaseStorageClient):
         except Exception as e:
             logger.error(f"Failed to reset connection pool: {str(e)}")
             raise
+
+    async def update_contact_metadata(self, user_id: int, email: str, metadata_update: Dict) -> bool:
+        """Update contact metadata with enrichment data"""
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                async with self.conn_pool.acquire() as conn:
+                    # Get current metadata
+                    current_row = await conn.fetchrow("""
+                        SELECT metadata FROM contacts 
+                        WHERE user_id = $1 AND email = $2
+                    """, user_id, email)
+                    
+                    if not current_row:
+                        logger.warning(f"Contact not found for metadata update: {email}")
+                        return False
+                    
+                    # Parse current metadata
+                    current_metadata = current_row['metadata']
+                    if isinstance(current_metadata, str):
+                        try:
+                            current_metadata = json.loads(current_metadata)
+                        except:
+                            current_metadata = {}
+                    elif not isinstance(current_metadata, dict):
+                        current_metadata = {}
+                    
+                    # Merge with new metadata
+                    updated_metadata = {**current_metadata, **metadata_update}
+                    
+                    # Update the contact
+                    await conn.execute("""
+                        UPDATE contacts 
+                        SET metadata = $1, updated_at = CURRENT_TIMESTAMP
+                        WHERE user_id = $2 AND email = $3
+                    """, json.dumps(updated_metadata), user_id, email)
+                    
+                    logger.info(f"Successfully updated metadata for contact: {email}")
+                    return True
+                    
+            except Exception as e:
+                error_msg = str(e)
+                if "another operation is in progress" in error_msg and attempt < max_retries - 1:
+                    logger.warning(f"Connection pool issue, resetting pool (attempt {attempt + 1})")
+                    await self.reset_connection_pool()
+                    await asyncio.sleep(1)
+                    continue
+                else:
+                    logger.error(f"Failed to update contact metadata for {email}: {error_msg}")
+                    if attempt == max_retries - 1:
+                        return False
+        
+        return False

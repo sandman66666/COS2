@@ -59,17 +59,22 @@ def create_app():
     @app.route('/')
     def index():
         """Serve the main dashboard"""
-        return render_template('dashboard.html')
+        return render_template('dashboard_new.html')
     
     @app.route('/dashboard')
     def dashboard():
         """Dashboard route that serves the main dashboard"""
-        return render_template('dashboard.html')
+        return render_template('dashboard_new.html')
     
     @app.route('/login')
     def login_page():
         """Serve login page"""
         return render_template('login.html')
+    
+    @app.route('/knowledge-tree')
+    def knowledge_tree():
+        """Serve knowledge tree visualization page"""
+        return render_template('knowledge_tree.html')
     
     @app.route('/health')
     def health_check():

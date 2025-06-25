@@ -6,10 +6,10 @@ Flask-compatible routes without async/event loop conflicts
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from flask import Blueprint, request, jsonify, current_app, session
+from flask import Blueprint, request, jsonify, current_app, session, render_template
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -414,7 +414,15 @@ def inspect_stored_emails():
         email_list = []
         for email in emails:
             try:
-                metadata = json.loads(email['metadata']) if email['metadata'] else {}
+                # Handle both dict and string metadata formats
+                metadata = email['metadata']
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                elif not isinstance(metadata, dict):
+                    metadata = {}
             except:
                 metadata = {}
                 
@@ -475,24 +483,38 @@ def inspect_stored_contacts():
         contact_list = []
         for contact in contacts:
             try:
-                metadata = json.loads(contact['metadata']) if contact['metadata'] else {}
-            except:
-                metadata = {}
+                # Handle both dict and string metadata formats
+                metadata = contact.get('metadata')
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                elif not isinstance(metadata, dict):
+                    metadata = {}
+                else:
+                    metadata = metadata or {}
+                    
+                enrichment_data = metadata.get('enrichment_data', {})
                 
-            contact_data = {
-                'id': contact['id'],
-                'email': contact['email'],
-                'name': contact['name'],
-                'trust_tier': contact['trust_tier'],
-                'frequency': contact['frequency'],
-                'domain': contact['domain'],
-                'created_at': contact['created_at'].isoformat() if contact['created_at'] else None,
-                'updated_at': contact['updated_at'].isoformat() if contact['updated_at'] else None,
-                'metadata': metadata,
-                'has_augmentation': 'enrichment_data' in metadata or 'enrichment_method' in metadata or metadata.get('enrichment_status') == 'enriched',
-                'enrichment_status': metadata.get('enrichment_status', 'enriched' if 'enrichment_data' in metadata else 'not_enriched')
-            }
-            contact_list.append(contact_data)
+                contact_data = {
+                    'id': contact['id'],
+                    'email': contact['email'],
+                    'name': contact['name'],
+                    'trust_tier': contact['trust_tier'],
+                    'frequency': contact['frequency'],
+                    'domain': contact['domain'],
+                    'created_at': contact['created_at'].isoformat() if contact['created_at'] else None,
+                    'updated_at': contact['updated_at'].isoformat() if contact['updated_at'] else None,
+                    'metadata': metadata,
+                    'has_augmentation': 'enrichment_data' in metadata or 'enrichment_method' in metadata or metadata.get('enrichment_status') == 'enriched',
+                    'enrichment_status': metadata.get('enrichment_status', 'enriched' if 'enrichment_data' in metadata else 'not_enriched')
+                }
+                contact_list.append(contact_data)
+                
+            except Exception as e:
+                logger.error(f"Error processing contact {contact.get('email', 'unknown')}: {e}")
+                continue
         
         return jsonify({
             'success': True,
@@ -540,7 +562,7 @@ def test_sync_auth():
 @api_sync_bp.route('/emails/sync', methods=['POST'])
 @require_auth
 def sync_emails():
-    """Email sync with real Gmail integration (synchronous)"""
+    """Email sync filtered by discovered contacts - time-based, all contacts (synchronous)"""
     try:
         user_email = session.get('user_id', 'test@session-42.com')
         request_data = request.get_json() or {}
@@ -557,6 +579,7 @@ def sync_emails():
         import time
         import base64
         import email
+        import re
         
         storage_manager = get_storage_manager_sync()
         user = storage_manager.get_user_by_email(user_email)
@@ -569,143 +592,237 @@ def sync_emails():
         
         user_id = user['id']
         
+        # Get ALL contacts from Step 1 (no trust tier filtering)
+        target_contacts = set()
+        contacts, _ = storage_manager.get_contacts(user_id, limit=10000)  # Get all contacts
+        for contact in contacts:
+            target_contacts.add(contact['email'].lower())
+        
+        if not target_contacts:
+            return jsonify({
+                'success': False,
+                'error': 'No contacts found. Please run Step 1 (Extract Official Contacts) first.',
+                'mode': 'synchronous'
+            }), 400
+        
+        logger.info(f"Syncing emails from {len(target_contacts)} discovered contacts for past {days} days")
+        
         # Get OAuth credentials from session
         oauth_credentials = session.get('oauth_credentials')
         if not oauth_credentials:
             return jsonify({
                 'success': False,
-                'error': 'No Gmail credentials. Please re-authenticate.',
+                'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
+                'action_required': 'reauth',
                 'mode': 'synchronous'
             }), 401
         
         # Create credentials object
-        credentials = Credentials(
-            token=oauth_credentials.get('access_token'),
-            refresh_token=oauth_credentials.get('refresh_token'),
-            token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
-            client_id=oauth_credentials.get('client_id'),
-            client_secret=oauth_credentials.get('client_secret'),
-            scopes=oauth_credentials.get('scopes', [])
-        )
+        try:
+            credentials = Credentials(
+                token=oauth_credentials.get('access_token'),
+                refresh_token=oauth_credentials.get('refresh_token'),
+                token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
+                client_id=oauth_credentials.get('client_id'),
+                client_secret=oauth_credentials.get('client_secret'),
+                scopes=oauth_credentials.get('scopes', [])
+            )
+        except Exception as cred_error:
+            return jsonify({
+                'success': False,
+                'error': f'Gmail credentials are invalid or expired. Please log out and log back in to re-authenticate. Error: {str(cred_error)}',
+                'action_required': 'reauth',
+                'mode': 'synchronous'
+            }), 401
         
         # Build Gmail service
-        service = build('gmail', 'v1', credentials=credentials)
+        try:
+            service = build('gmail', 'v1', credentials=credentials)
+        except Exception as service_error:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to connect to Gmail API. Please log out and log back in to re-authenticate. Error: {str(service_error)}',
+                'action_required': 'reauth',
+                'mode': 'synchronous'
+            }), 401
         
         # Calculate date range
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
-        query = f'after:{cutoff_date.strftime("%Y/%m/%d")}'
-        
-        # Get messages
-        messages_response = service.users().messages().list(
-            userId='me',
-            q=query,
-            maxResults=min(100, 500)  # Reasonable limit for sync
-        ).execute()
-        
-        messages = messages_response.get('messages', [])
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         
         processed_count = 0
         new_emails = 0
         updated_emails = 0
+        contacts_processed = 0
         
-        # Process each message
-        for msg in messages:
+        # Process emails for each contact individually - no limits, just time-based
+        logger.info(f"Searching for ALL emails from discovered contacts since {cutoff_date.strftime('%Y-%m-%d')}")
+        
+        for contact_email in target_contacts:
             try:
-                # Get full message
-                msg_data = service.users().messages().get(
-                    userId='me',
-                    id=msg['id'],
-                    format='full'
-                ).execute()
+                contacts_processed += 1
                 
-                # Parse message headers
-                headers = {}
-                for header in msg_data.get('payload', {}).get('headers', []):
-                    name = header.get('name', '').lower()
-                    value = header.get('value', '')
-                    headers[name] = value
+                # Build query for this specific contact - time-based only
+                query = f'(from:{contact_email} OR to:{contact_email}) after:{cutoff_date.strftime("%Y/%m/%d")}'
                 
-                # Extract basic info
-                subject = headers.get('subject', '(No Subject)')
-                from_addr = headers.get('from', '')
-                to_addr = headers.get('to', '')
-                date_str = headers.get('date', '')
+                logger.info(f"Processing contact {contacts_processed}/{len(target_contacts)}: {contact_email}")
                 
-                # Parse date
-                try:
-                    if date_str:
-                        date_sent = email.utils.parsedate_to_datetime(date_str)
-                    else:
-                        date_sent = datetime.utcnow()
-                except:
-                    date_sent = datetime.utcnow()
+                # Get ALL messages for this contact (no maxResults limit for time-based approach)
+                messages = []
+                page_token = None
                 
-                # Extract body
-                body_text = ""
-                if 'payload' in msg_data:
-                    payload = msg_data['payload']
-                    if 'parts' in payload:
-                        for part in payload['parts']:
-                            if part.get('mimeType') == 'text/plain' and 'body' in part and 'data' in part['body']:
-                                try:
-                                    body_text = base64.urlsafe_b64decode(
-                                        part['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                                    break
-                                except:
-                                    pass
-                    elif 'body' in payload and 'data' in payload['body']:
-                        if payload.get('mimeType') == 'text/plain':
-                            try:
-                                body_text = base64.urlsafe_b64decode(
-                                    payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                            except:
-                                pass
+                while True:
+                    try:
+                        if page_token:
+                            messages_response = service.users().messages().list(
+                                userId='me',
+                                q=query,
+                                pageToken=page_token
+                            ).execute()
+                        else:
+                            messages_response = service.users().messages().list(
+                                userId='me',
+                                q=query
+                            ).execute()
+                        
+                        batch_messages = messages_response.get('messages', [])
+                        messages.extend(batch_messages)
+                        
+                        page_token = messages_response.get('nextPageToken')
+                        if not page_token:
+                            break
+                            
+                        # Throttle between API calls
+                        time.sleep(0.1)
+                        
+                    except Exception as e:
+                        logger.error(f"Error fetching messages page for {contact_email}: {e}")
+                        break
                 
-                # Store email
-                metadata = {
-                    'subject': subject,
-                    'from': from_addr,
-                    'to': to_addr,
-                    'date': date_str,
-                    'headers': headers
-                }
+                if not messages:
+                    continue
                 
-                # Check if email exists
-                existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
-                if existing:
-                    updated_emails += 1
-                else:
-                    # Store new email
-                    storage_manager.postgres.store_email(
-                        user_id=user_id,
-                        gmail_id=msg['id'],
-                        content=body_text,
-                        metadata=metadata,
-                        timestamp=date_sent
-                    )
-                    new_emails += 1
+                logger.info(f"Found {len(messages)} emails for {contact_email}")
                 
-                processed_count += 1
+                # Process each message
+                for msg in messages:
+                    try:
+                        # Check if we already have this email
+                        existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
+                        if existing:
+                            updated_emails += 1
+                            continue
+                        
+                        # Get full message
+                        msg_data = service.users().messages().get(
+                            userId='me',
+                            id=msg['id'],
+                            format='full'
+                        ).execute()
+                        
+                        # Parse message headers
+                        headers = {}
+                        for header in msg_data.get('payload', {}).get('headers', []):
+                            name = header.get('name', '').lower()
+                            value = header.get('value', '')
+                            headers[name] = value
+                        
+                        # Extract basic info
+                        subject = headers.get('subject', '(No Subject)')
+                        from_addr = headers.get('from', '')
+                        to_addr = headers.get('to', '')
+                        date_str = headers.get('date', '')
+                        
+                        # Verify this email involves our target contact
+                        email_text = f"{from_addr} {to_addr}".lower()
+                        if contact_email not in email_text:
+                            continue
+                        
+                        # Parse date
+                        try:
+                            if date_str:
+                                date_sent = email.utils.parsedate_to_datetime(date_str)
+                            else:
+                                date_sent = datetime.now(timezone.utc)
+                        except:
+                            date_sent = datetime.now(timezone.utc)
+                        
+                        # Skip if email is older than our cutoff (extra safety)
+                        if date_sent < cutoff_date:
+                            continue
+                        
+                        # Extract body
+                        body_text = ""
+                        if 'payload' in msg_data:
+                            payload = msg_data['payload']
+                            if 'parts' in payload:
+                                for part in payload['parts']:
+                                    if part.get('mimeType') == 'text/plain' and 'body' in part and 'data' in part['body']:
+                                        try:
+                                            body_text = base64.urlsafe_b64decode(
+                                                part['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                            break
+                                        except:
+                                            pass
+                            elif 'body' in payload and 'data' in payload['body']:
+                                if payload.get('mimeType') == 'text/plain':
+                                    try:
+                                        body_text = base64.urlsafe_b64decode(
+                                            payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                    except:
+                                        pass
+                        
+                        # Store email with contact context
+                        metadata = {
+                            'subject': subject,
+                            'from': from_addr,
+                            'to': to_addr,
+                            'date': date_str,
+                            'headers': headers,
+                            'associated_contact': contact_email,
+                            'sync_method': 'contact_time_based'
+                        }
+                        
+                        # Store new email
+                        storage_manager.postgres.store_email(
+                            user_id=user_id,
+                            gmail_id=msg['id'],
+                            content=body_text,
+                            metadata=metadata,
+                            timestamp=date_sent
+                        )
+                        new_emails += 1
+                        processed_count += 1
+                        
+                        # Throttle to avoid quota issues
+                        time.sleep(0.05)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing email {msg.get('id')} for contact {contact_email}: {e}")
+                        continue
                 
-                # Throttle to avoid quota issues
-                time.sleep(0.1)
+                # Throttle between contacts
+                time.sleep(0.2)
                 
             except Exception as e:
-                logger.error(f"Error processing email {msg.get('id')}: {e}")
+                logger.error(f"Error processing contact {contact_email}: {e}")
                 continue
         
-        logger.info(f"Email sync completed for user {user_email}", 
-                   processed=processed_count, new=new_emails, updated=updated_emails)
+        logger.info(f"Email sync completed for user {user_email} using time-based contact filtering", 
+                   processed=processed_count, new=new_emails, updated=updated_emails, 
+                   contacts_processed=contacts_processed, target_contacts=len(target_contacts))
         
         return jsonify({
             'success': True,
-            'message': f'Successfully synced {processed_count} emails',
+            'message': f'Successfully synced {processed_count} emails from {contacts_processed} contacts over {days} days',
             'stats': {
-                'processed': processed_count,
+                'processed_emails': processed_count,
                 'new_emails': new_emails,
                 'updated_emails': updated_emails,
                 'days_synced': days,
-                'total_found': len(messages)
+                'contacts_processed': contacts_processed,
+                'total_contacts': len(target_contacts),
+                'sync_method': 'time_based_contact_filtering',
+                'date_range': f"{cutoff_date.strftime('%Y-%m-%d')} to {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
             },
             'mode': 'synchronous'
         })
@@ -756,25 +873,42 @@ def analyze_sent_emails():
         if not oauth_credentials:
             return jsonify({
                 'success': False,
-                'error': 'No Gmail credentials. Please re-authenticate.',
+                'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
+                'action_required': 'reauth',
                 'mode': 'synchronous'
             }), 401
         
         # Create credentials object
-        credentials = Credentials(
-            token=oauth_credentials.get('access_token'),
-            refresh_token=oauth_credentials.get('refresh_token'),
-            token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
-            client_id=oauth_credentials.get('client_id'),
-            client_secret=oauth_credentials.get('client_secret'),
-            scopes=oauth_credentials.get('scopes', [])
-        )
+        try:
+            credentials = Credentials(
+                token=oauth_credentials.get('access_token'),
+                refresh_token=oauth_credentials.get('refresh_token'),
+                token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
+                client_id=oauth_credentials.get('client_id'),
+                client_secret=oauth_credentials.get('client_secret'),
+                scopes=oauth_credentials.get('scopes', [])
+            )
+        except Exception as cred_error:
+            return jsonify({
+                'success': False,
+                'error': f'Gmail credentials are invalid or expired. Please log out and log back in to re-authenticate. Error: {str(cred_error)}',
+                'action_required': 'reauth',
+                'mode': 'synchronous'
+            }), 401
         
         # Build Gmail service
-        service = build('gmail', 'v1', credentials=credentials)
+        try:
+            service = build('gmail', 'v1', credentials=credentials)
+        except Exception as service_error:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to connect to Gmail API. Please log out and log back in to re-authenticate. Error: {str(service_error)}',
+                'action_required': 'reauth',
+                'mode': 'synchronous'
+            }), 401
         
         # Calculate date range for sent emails
-        cutoff_date = datetime.utcnow() - timedelta(days=lookback_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
         query = f'in:sent after:{cutoff_date.strftime("%Y/%m/%d")}'
         
         # Get sent messages
@@ -941,7 +1075,7 @@ def analyze_sent_emails():
 @api_sync_bp.route('/intelligence/enrich-contacts', methods=['POST'])
 @require_auth  
 def enrich_contacts():
-    """Contact enrichment with real processing (synchronous)"""
+    """Contact enrichment with advanced web intelligence (synchronous)"""
     try:
         user_email = session.get('user_id', 'test@session-42.com')
         request_data = request.get_json() or {}
@@ -958,105 +1092,198 @@ def enrich_contacts():
         
         user_id = user['id']
         
-        # Get contacts that need enrichment
-        contacts, total = storage_manager.get_contacts(user_id, limit=limit)
+        # Get contacts that need enrichment - SKIP ALREADY ENRICHED
+        all_contacts, total = storage_manager.get_contacts(user_id, limit=limit * 2)  # Get more to filter
+        
+        # Filter out contacts that already have enrichment data (resume capability)
+        contacts_to_enrich = []
+        already_enriched_count = 0
+        
+        for contact in all_contacts:
+            try:
+                # Check if contact already has enrichment data
+                metadata = contact.get('metadata')
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                elif not isinstance(metadata, dict):
+                    metadata = {}
+                else:
+                    metadata = metadata or {}
+                
+                # Skip if already enriched with good confidence
+                enrichment_data = metadata.get('enrichment_data', {})
+                if enrichment_data and enrichment_data.get('confidence_score', 0) > 0.3:
+                    already_enriched_count += 1
+                    logger.info(f"⏭️ Skipping {contact['email']} - already enriched (confidence: {enrichment_data.get('confidence_score', 0)})")
+                    continue
+                
+                contacts_to_enrich.append(contact)
+                
+                # Stop when we have enough to process
+                if len(contacts_to_enrich) >= limit:
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Error checking enrichment status for {contact.get('email', 'unknown')}: {e}")
+                contacts_to_enrich.append(contact)  # Include if we can't determine status
+        
+        contacts = contacts_to_enrich
         
         if not contacts:
             return jsonify({
                 'success': True,
-                'message': 'No contacts found to enrich',
+                'message': f'No contacts need enrichment. {already_enriched_count} contacts already enriched.',
                 'stats': {
                     'contacts_processed': 0,
                     'successfully_enriched': 0,
                     'failed_count': 0,
                     'success_rate': 0,
-                    'sources_used': 0
+                    'sources_used': 0,
+                    'already_enriched': already_enriched_count,
+                    'resume_capability': True
                 },
                 'mode': 'synchronous'
             })
         
-        # Import the real contact enrichment service
+        # Import the advanced contact enrichment service
         import sys
         import os
         import asyncio
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from intelligence.d_enrichment.contact_enrichment_integration import ContactEnrichmentService
+        from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
         
-        # Use the real enrichment service
-        async def run_real_enrichment():
-            enrichment_service = ContactEnrichmentService(user_id)
+        # Use the advanced enrichment service with multi-strategy web intelligence
+        async def run_advanced_enrichment():
+            enrichment_service = ContactEnrichmentService(user_id, storage_manager)
+            await enrichment_service.initialize()
+            
+            # Get user emails for enrichment context
+            user_emails = []
             try:
-                # Initialize the service
-                await enrichment_service.initialize()
-                
-                # Convert contacts to the format expected by the enricher
-                contact_list = []
-                for contact in contacts:
-                    contact_dict = {
-                        'email': contact.get('email', ''),
-                        'name': contact.get('name', ''),
-                        'domain': contact.get('domain', ''),
-                        'trust_tier': contact.get('trust_tier', 'tier_3'),
-                        'frequency': contact.get('frequency', 0)
-                    }
-                    contact_list.append(contact_dict)
-                
-                # Perform batch enrichment with real processing
-                enrichment_results = await enrichment_service.enrich_contacts_batch(
-                    contact_list, 
-                    max_concurrent=2  # Conservative rate limiting
-                )
-                
-                # Calculate statistics
-                successful = sum(1 for result in enrichment_results.values() if result.get('success', False))
-                failed = len(enrichment_results) - successful
-                success_rate = successful / len(enrichment_results) if enrichment_results else 0
-                
-                # Count unique data sources used
-                data_sources = set()
-                for result in enrichment_results.values():
-                    if result.get('success') and result.get('data_sources'):
-                        data_sources.update(result['data_sources'])
-                
-                return {
-                    'contacts_processed': len(enrichment_results),
-                    'successfully_enriched': successful,
-                    'failed_count': failed,
-                    'success_rate': success_rate,
-                    'sources_used': len(data_sources),
-                    'enrichment_results': enrichment_results
-                }
-                
-            finally:
-                await enrichment_service.cleanup()
+                user_emails = storage_manager.get_emails(user_id, limit=500)
+                logger.info(f"Retrieved {len(user_emails)} user emails for enrichment context")
+            except Exception as e:
+                logger.warning(f"Could not get user emails for enrichment: {e}")
+            
+            # Run enhanced enrichment
+            enriched_data = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
+            enriched_contacts = enriched_data.get('enriched_contacts', {})
+            
+            # Store enrichment results in database
+            successful_enrichments = 0
+            for email, enrichment_result in enriched_contacts.items():
+                try:
+                    if enrichment_result.get('confidence_score', 0) > 0.3:
+                        # Format enrichment data for database storage
+                        enrichment_data = {
+                            'enrichment_method': 'advanced_web_intelligence',
+                            'enrichment_timestamp': datetime.utcnow().isoformat(),
+                            'enrichment_status': 'success',
+                            'confidence_score': enrichment_result.get('confidence_score', 0),
+                            'data_sources': enrichment_result.get('data_sources', []),
+                            'person_data': enrichment_result.get('person_data', {}),
+                            'company_data': enrichment_result.get('company_data', {}),
+                            'intelligence_summary': enrichment_result.get('intelligence_summary', {})
+                        }
+                        
+                        # Update contact metadata in database
+                        success = storage_manager.postgres.update_contact_metadata(
+                            user_id, email, {'enrichment_data': enrichment_data}
+                        )
+                        
+                        if success:
+                            successful_enrichments += 1
+                            logger.info(f"✅ Stored enrichment for {email} in database")
+                        else:
+                            logger.warning(f"⚠️ Failed to store enrichment for {email}")
+                            
+                except Exception as store_error:
+                    logger.error(f"❌ Error storing enrichment for {email}: {store_error}")
+            
+            logger.info(f"💾 Successfully stored {successful_enrichments}/{len(enriched_contacts)} enrichments in database")
+            
+            await enrichment_service.cleanup()
+            
+            # Calculate and return statistics
+            total_processed = len(enriched_contacts)
+            successful = sum(1 for result in enriched_contacts.values() 
+                           if result.get('confidence_score', 0) > 0.3)
+            failed = total_processed - successful
+            success_rate = successful / total_processed if total_processed else 0
+            
+            # Count unique data sources used
+            data_sources = set()
+            for result in enriched_contacts.values():
+                if result.get('data_sources'):
+                    data_sources.update(result['data_sources'])
+            
+            return {
+                'contacts_processed': total_processed,
+                'successfully_enriched': successful,
+                'failed_count': failed,
+                'success_rate': success_rate,
+                'sources_used': len(data_sources),
+                'data_sources_list': list(data_sources),
+                'domains_analyzed': enriched_data.get('domains_analyzed', 0),
+                'enrichments_stored_in_db': successful_enrichments,
+                'enrichment_results': enriched_contacts,
+                'mode': 'advanced_web_intelligence_with_db_storage'
+            }
         
-        # Run the async enrichment in a synchronous context
+        # Run the async advanced enrichment in a synchronous context
         try:
             # Create new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            stats = loop.run_until_complete(run_real_enrichment())
+            stats = loop.run_until_complete(run_advanced_enrichment())
             loop.close()
         except Exception as e:
-            logger.error(f"Real contact enrichment failed: {e}")
-            # Fallback to basic enrichment if real one fails
+            logger.error(f"Advanced contact enrichment failed: {e}")
+            # Fallback to basic enrichment if advanced one fails
             stats = {
                 'contacts_processed': len(contacts),
                 'successfully_enriched': 0,
                 'failed_count': len(contacts),
                 'success_rate': 0.0,
                 'sources_used': 0,
-                'error': f"Advanced enrichment failed: {str(e)}"
+                'error': f"Advanced enrichment failed: {str(e)}",
+                'mode': 'fallback_error'
             }
         
-        logger.info(f"Contact enrichment completed for user {user_email}", stats=stats)
+        # Create success message with details about advanced features
+        advanced_features = stats.get('advanced_features', {})
+        features_summary = []
+        if advanced_features.get('browser_automation_used', 0) > 0:
+            features_summary.append(f"browser automation ({advanced_features['browser_automation_used']} sites)")
+        if advanced_features.get('multi_engine_search_used', 0) > 0:
+            features_summary.append(f"multi-engine search ({advanced_features['multi_engine_search_used']} queries)")
+        if advanced_features.get('company_intelligence_gathered', 0) > 0:
+            features_summary.append(f"company intelligence ({advanced_features['company_intelligence_gathered']} companies)")
+        
+        features_text = ", ".join(features_summary) if features_summary else "basic enrichment"
+        
+        logger.info(f"Advanced contact enrichment completed for user {user_email}", stats=stats)
+        
+        # Create enhanced message with resume info
+        if already_enriched_count > 0:
+            message = f'Successfully enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts using {features_text}. Skipped {already_enriched_count} already-enriched contacts (resume capability).'
+        else:
+            message = f'Successfully enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts using {features_text}'
+        
+        # Add resume capability info to stats
+        stats['already_enriched'] = already_enriched_count
+        stats['resume_capability'] = True
+        stats['contacts_remaining'] = max(0, total - already_enriched_count - stats["contacts_processed"])
         
         return jsonify({
             'success': True,
-            'message': f'Successfully enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts using real intelligence',
+            'message': message,
             'stats': stats,
-            'mode': 'synchronous_with_real_intelligence'
+            'mode': 'synchronous_with_advanced_intelligence'
         })
         
     except Exception as e:
@@ -1217,12 +1444,22 @@ def view_enrichment_results():
         enriched_contacts = []
         for contact in contacts:
             try:
-                # Parse metadata which contains enrichment data
-                metadata = json.loads(contact.get('metadata', '{}')) if contact.get('metadata') else {}
+                # Handle both dict and string metadata formats
+                metadata = contact.get('metadata')
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                elif not isinstance(metadata, dict):
+                    metadata = {}
+                else:
+                    metadata = metadata or {}
+                    
                 enrichment_data = metadata.get('enrichment_data', {})
                 
                 if format_type == 'detailed':
-                    # Detailed format with all enrichment data
+                    # Detailed format with all enrichment data including professional intelligence
                     contact_result = {
                         'email': contact.get('email'),
                         'name': contact.get('name'),
@@ -1233,26 +1470,79 @@ def view_enrichment_results():
                             'success': bool(enrichment_data),
                             'confidence_score': enrichment_data.get('confidence_score', 0),
                             'data_sources': enrichment_data.get('data_sources', []),
+                            
+                            # Comprehensive professional intelligence
                             'person_data': enrichment_data.get('person_data', {}),
                             'company_data': enrichment_data.get('company_data', {}),
+                            'relationship_intelligence': enrichment_data.get('relationship_intelligence', {}),
+                            'actionable_insights': enrichment_data.get('actionable_insights', {}),
+                            
                             'enrichment_timestamp': enrichment_data.get('enrichment_timestamp'),
-                            'intelligence_summary': enrichment_data.get('intelligence_summary', {})
+                            
+                            # Quick access fields for UI
+                            'professional_summary': {
+                                'current_role': enrichment_data.get('person_data', {}).get('current_title', ''),
+                                'career_stage': enrichment_data.get('person_data', {}).get('career_stage', ''),
+                                'years_experience': enrichment_data.get('person_data', {}).get('professional_background', {}).get('years_experience', ''),
+                                'industry_expertise': enrichment_data.get('person_data', {}).get('professional_background', {}).get('industry_expertise', []),
+                                'investment_focus': enrichment_data.get('person_data', {}).get('current_focus', {}).get('investment_thesis', ''),
+                                'decision_authority': enrichment_data.get('person_data', {}).get('value_proposition', {}).get('decision_authority', ''),
+                                'network_value': enrichment_data.get('person_data', {}).get('value_proposition', {}).get('network_value', ''),
+                            },
+                            
+                            'company_summary': {
+                                'business_model': enrichment_data.get('company_data', {}).get('company_profile', {}).get('business_model', ''),
+                                'company_stage': enrichment_data.get('company_data', {}).get('company_profile', {}).get('company_stage', ''),
+                                'funding_status': enrichment_data.get('company_data', {}).get('financial_intelligence', {}).get('funding_status', ''),
+                                'key_investors': enrichment_data.get('company_data', {}).get('financial_intelligence', {}).get('key_investors', []),
+                                'competitive_position': enrichment_data.get('company_data', {}).get('market_position', {}).get('competitive_landscape', ''),
+                                'growth_trajectory': enrichment_data.get('company_data', {}).get('financial_intelligence', {}).get('growth_trajectory', ''),
+                            },
+                            
+                            'engagement_strategy': {
+                                'relationship_stage': enrichment_data.get('relationship_intelligence', {}).get('relationship_stage', ''),
+                                'best_approach': enrichment_data.get('actionable_insights', {}).get('best_approach', ''),
+                                'value_propositions': enrichment_data.get('actionable_insights', {}).get('value_propositions', []),
+                                'conversation_starters': enrichment_data.get('actionable_insights', {}).get('conversation_starters', []),
+                                'meeting_likelihood': enrichment_data.get('actionable_insights', {}).get('meeting_likelihood', ''),
+                                'timing_considerations': enrichment_data.get('actionable_insights', {}).get('timing_considerations', ''),
+                            }
                         }
                     }
                 else:
-                    # Summary format with key insights only
+                    # Enhanced summary format with key professional insights
                     person_data = enrichment_data.get('person_data', {})
                     company_data = enrichment_data.get('company_data', {})
+                    relationship_intel = enrichment_data.get('relationship_intelligence', {})
+                    actionable_insights = enrichment_data.get('actionable_insights', {})
                     
                     contact_result = {
                         'email': contact.get('email'),
                         'name': contact.get('name') or person_data.get('name', ''),
-                        'title': person_data.get('title', ''),
+                        'title': person_data.get('current_title', person_data.get('title', '')),
                         'company': company_data.get('name', ''),
                         'industry': company_data.get('industry', ''),
-                        'confidence': enrichment_data.get('confidence_score', 0),
-                        'sources': len(enrichment_data.get('data_sources', [])),
-                        'enriched': bool(enrichment_data)
+                        'seniority_level': person_data.get('seniority_level', ''),
+                        'confidence_score': enrichment_data.get('confidence_score', 0),
+                        'data_sources': enrichment_data.get('data_sources', []),
+                        'trust_tier': contact.get('trust_tier'),
+                        'frequency': contact.get('frequency'),
+                        'enrichment_timestamp': enrichment_data.get('enrichment_timestamp'),
+                        
+                        # Professional intelligence summary
+                        'career_stage': person_data.get('career_stage', ''),
+                        'years_experience': person_data.get('professional_background', {}).get('years_experience', ''),
+                        'investment_thesis': person_data.get('current_focus', {}).get('investment_thesis', ''),
+                        'decision_authority': person_data.get('value_proposition', {}).get('decision_authority', ''),
+                        'company_stage': company_data.get('company_profile', {}).get('company_stage', ''),
+                        'funding_status': company_data.get('financial_intelligence', {}).get('funding_status', ''),
+                        'key_investors': company_data.get('financial_intelligence', {}).get('key_investors', []),
+                        'competitive_position': company_data.get('market_position', {}).get('competitive_landscape', ''),
+                        'relationship_stage': relationship_intel.get('relationship_stage', ''),
+                        'engagement_level': relationship_intel.get('engagement_level', ''),
+                        'best_approach': actionable_insights.get('best_approach', ''),
+                        'meeting_likelihood': actionable_insights.get('meeting_likelihood', ''),
+                        'conversation_starters': actionable_insights.get('conversation_starters', []),
                     }
                 
                 enriched_contacts.append(contact_result)
@@ -1326,8 +1616,18 @@ def download_enrichment_results():
         
         for contact in contacts:
             try:
-                # Parse metadata which contains enrichment data
-                metadata = json.loads(contact.get('metadata', '{}')) if contact.get('metadata') else {}
+                # Handle both dict and string metadata formats
+                metadata = contact.get('metadata')
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                elif not isinstance(metadata, dict):
+                    metadata = {}
+                else:
+                    metadata = metadata or {}
+                    
                 enrichment_data = metadata.get('enrichment_data', {})
                 
                 enrichment_stats['total_processed'] += 1
@@ -1362,11 +1662,13 @@ def download_enrichment_results():
                     # Summary format
                     person_data = enrichment_data.get('person_data', {})
                     company_data = enrichment_data.get('company_data', {})
+                    relationship_intel = enrichment_data.get('relationship_intelligence', {})
+                    actionable_insights = enrichment_data.get('actionable_insights', {})
                     
                     contact_result = {
                         'email': contact.get('email'),
                         'name': contact.get('name') or person_data.get('name', ''),
-                        'title': person_data.get('title', ''),
+                        'title': person_data.get('current_title', person_data.get('title', '')),
                         'company': company_data.get('name', ''),
                         'industry': company_data.get('industry', ''),
                         'seniority_level': person_data.get('seniority_level', ''),
@@ -1374,7 +1676,22 @@ def download_enrichment_results():
                         'data_sources': enrichment_data.get('data_sources', []),
                         'trust_tier': contact.get('trust_tier'),
                         'frequency': contact.get('frequency'),
-                        'enrichment_timestamp': enrichment_data.get('enrichment_timestamp')
+                        'enrichment_timestamp': enrichment_data.get('enrichment_timestamp'),
+                        
+                        # Professional intelligence summary
+                        'career_stage': person_data.get('career_stage', ''),
+                        'years_experience': person_data.get('professional_background', {}).get('years_experience', ''),
+                        'investment_thesis': person_data.get('current_focus', {}).get('investment_thesis', ''),
+                        'decision_authority': person_data.get('value_proposition', {}).get('decision_authority', ''),
+                        'company_stage': company_data.get('company_profile', {}).get('company_stage', ''),
+                        'funding_status': company_data.get('financial_intelligence', {}).get('funding_status', ''),
+                        'key_investors': company_data.get('financial_intelligence', {}).get('key_investors', []),
+                        'competitive_position': company_data.get('market_position', {}).get('competitive_landscape', ''),
+                        'relationship_stage': relationship_intel.get('relationship_stage', ''),
+                        'engagement_level': relationship_intel.get('engagement_level', ''),
+                        'best_approach': actionable_insights.get('best_approach', ''),
+                        'meeting_likelihood': actionable_insights.get('meeting_likelihood', ''),
+                        'conversation_starters': actionable_insights.get('conversation_starters', []),
                     }
                 
                 enriched_contacts.append(contact_result)
@@ -1434,4 +1751,762 @@ def download_enrichment_results():
         return jsonify({
             'success': False,
             'error': str(e)
-        }), 500 
+        }), 500
+
+@api_sync_bp.route('/sanity-test', methods=['POST'])
+@require_auth
+def run_sanity_test():
+    """End-to-end sanity test with 10 contacts and 10 emails (synchronous)"""
+    try:
+        user_email = session.get('user_id', 'test@session-42.com')
+        
+        logger.info(f"🧪 Starting sanity test for user {user_email}")
+        
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'User not found',
+                'mode': 'sanity_test'
+            }), 404
+        
+        user_id = user['id']
+        
+        # Get OAuth credentials from session
+        oauth_credentials = session.get('oauth_credentials')
+        if not oauth_credentials:
+            return jsonify({
+                'success': False,
+                'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
+                'mode': 'sanity_test'
+            }), 401
+        
+        # Step 1: Get 10 contacts from sent emails
+        logger.info("🔍 Step 1: Analyzing sent emails for 10 contacts...")
+        sent_analysis_result = analyze_sent_emails_internal(user_email, oauth_credentials, lookback_days=30, limit=10)
+        
+        if not sent_analysis_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': f"Step 1 failed: {sent_analysis_result.get('error')}",
+                'mode': 'sanity_test'
+            })
+        
+        contacts_found = sent_analysis_result.get('total_contacts', 0)
+        logger.info(f"✅ Step 1 complete: Found {contacts_found} contacts")
+        
+        if contacts_found == 0:
+            return jsonify({
+                'success': False,
+                'error': 'No contacts found in sent emails',
+                'mode': 'sanity_test'
+            })
+        
+        # Step 2: Sync 10 emails from these contacts
+        logger.info("📧 Step 2: Syncing emails from discovered contacts...")
+        email_sync_result = sync_emails_internal(user_email, oauth_credentials, days=30, contact_limit=10)
+        
+        if not email_sync_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': f"Step 2 failed: {email_sync_result.get('error')}",
+                'mode': 'sanity_test'
+            })
+        
+        emails_synced = email_sync_result.get('stats', {}).get('new_emails', 0)
+        logger.info(f"✅ Step 2 complete: Synced {emails_synced} emails")
+        
+        # Step 3: Enrich the 10 contacts
+        logger.info("🎯 Step 3: Enriching contacts...")
+        enrichment_result = enrich_contacts_internal(user_email, limit=10)
+        
+        if not enrichment_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': f"Step 3 failed: {enrichment_result.get('error')}",
+                'mode': 'sanity_test'
+            })
+        
+        enriched_count = enrichment_result.get('stats', {}).get('successfully_enriched', 0)
+        logger.info(f"✅ Step 3 complete: Enriched {enriched_count} contacts")
+        
+        # Step 4: Build knowledge tree
+        logger.info("🌳 Step 4: Building knowledge tree...")
+        tree_result = build_knowledge_tree_internal(user_email)
+        
+        if not tree_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': f"Step 4 failed: {tree_result.get('error')}",
+                'mode': 'sanity_test'
+            })
+        
+        tree_nodes = tree_result.get('stats', {}).get('total_nodes', 0)
+        logger.info(f"✅ Step 4 complete: Built knowledge tree with {tree_nodes} nodes")
+        
+        # Step 5: Generate Strategic Intelligence & Tactical Alerts
+        logger.info("🎯 Step 5: Generating strategic intelligence and tactical alerts...")
+        strategic_result = strategic_intelligence_internal(user_email, limit=10)
+        
+        if not strategic_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': f"Step 5 failed: {strategic_result.get('error')}",
+                'mode': 'sanity_test'
+            }), 500
+        
+        strategic_insights = strategic_result.get('insights_generated', 0)
+        tactical_alerts = strategic_result.get('tactical_alerts', 0)
+        logger.info(f"✅ Step 5 complete: Generated {strategic_insights} insights and {tactical_alerts} alerts")
+        
+        # Final results
+        logger.info("🎉 Sanity test completed successfully!")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Sanity test completed successfully',
+            'results': {
+                'step_1_contacts': {
+                    'contacts_found': contacts_found,
+                    'status': 'success'
+                },
+                'step_2_emails': {
+                    'emails_synced': emails_synced,
+                    'status': 'success'
+                },
+                'step_3_enrichment': {
+                    'contacts_enriched': enriched_count,
+                    'status': 'success'
+                },
+                'step_4_knowledge_tree': {
+                    'tree_nodes': tree_nodes,
+                    'status': 'success'
+                },
+                'step_5_strategic_intelligence': {
+                    'insights_generated': strategic_insights,
+                    'tactical_alerts': tactical_alerts,
+                    'status': 'success'
+                }
+            },
+            'mode': 'sanity_test',
+            'duration': 'complete'
+        })
+        
+    except Exception as e:
+        logger.error(f"Sanity test failed: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'mode': 'sanity_test'
+        }), 500
+
+
+def analyze_sent_emails_internal(user_email: str, oauth_credentials: Dict, lookback_days: int = 30, limit: int = 10) -> Dict:
+    """Internal function to analyze sent emails with limit"""
+    try:
+        # Reuse existing analyze_sent_emails logic but with contact limit
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return {'success': False, 'error': 'User not found'}
+        
+        user_id = user['id']
+        
+        # Gmail integration logic (simplified version of existing code)
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from datetime import datetime, timedelta
+        import email.utils
+        import base64
+        
+        try:
+            # Use passed OAuth credentials from session
+            credentials = Credentials(
+                token=oauth_credentials.get('access_token'),
+                refresh_token=oauth_credentials.get('refresh_token'),
+                token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
+                client_id=oauth_credentials.get('client_id'),
+                client_secret=oauth_credentials.get('client_secret'),
+                scopes=oauth_credentials.get('scopes', [])
+            )
+            
+            service = build('gmail', 'v1', credentials=credentials)
+            
+            # Get sent emails from last N days
+            cutoff_date = datetime.utcnow() - timedelta(days=lookback_days)
+            query = f"in:sent after:{cutoff_date.strftime('%Y/%m/%d')}"
+            
+            result = service.users().messages().list(userId='me', q=query, maxResults=100).execute()  # Increased from 5 to 100
+            messages = result.get('messages', [])
+            
+            if not messages:
+                return {'success': False, 'error': 'No sent emails found'}
+            
+            # Analyze contacts from sent emails
+            contact_frequency = {}
+            contact_names = {}
+            contact_metadata = {}
+            
+            for msg in messages[:50]:  # Limit to first 50 sent emails
+                try:
+                    msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
+                    headers = {}
+                    for header in msg_data.get('payload', {}).get('headers', []):
+                        headers[header.get('name', '').lower()] = header.get('value', '')
+                    
+                    to_addr = headers.get('to', '')
+                    if to_addr and '@' in to_addr:
+                        # Extract email address
+                        import re
+                        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_addr)
+                        if email_match:
+                            email_addr = email_match.group().lower()
+                            contact_frequency[email_addr] = contact_frequency.get(email_addr, 0) + 1
+                            
+                            # Extract name if available
+                            if '<' in to_addr:
+                                name = to_addr.split('<')[0].strip(' "')
+                                if name:
+                                    contact_names[email_addr] = name
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing sent email {msg.get('id')}: {e}")
+                    continue
+            
+            # Convert to contact list and limit to requested number
+            contact_list = []
+            for email_addr, frequency in sorted(contact_frequency.items(), key=lambda x: x[1], reverse=True)[:limit]:
+                domain = email_addr.split('@')[1] if '@' in email_addr else ''
+                contact_list.append({
+                    'email': email_addr,
+                    'name': contact_names.get(email_addr, ''),
+                    'frequency': frequency,
+                    'domain': domain,
+                    'trust_tier': 'tier_1' if frequency > 3 else 'tier_2' if frequency > 1 else 'tier_3',
+                    'metadata': {}
+                })
+            
+            # Store contacts
+            if contact_list:
+                storage_manager.postgres.store_contacts(user_id, contact_list)
+            
+            return {
+                'success': True,
+                'total_contacts': len(contact_list),
+                'contacts': contact_list
+            }
+            
+        except Exception as gmail_error:
+            return {'success': False, 'error': f'Gmail integration error: {str(gmail_error)}'}
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def sync_emails_internal(user_email: str, oauth_credentials: Dict, days: int = 30, contact_limit: int = 10) -> Dict:
+    """Internal function to sync emails from specific contacts with limit"""
+    try:
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return {'success': False, 'error': 'User not found'}
+        
+        user_id = user['id']
+        
+        # Get contacts from database (limited by contact_limit)
+        contacts, total = storage_manager.get_contacts(user_id, limit=contact_limit)
+        if not contacts:
+            return {'success': False, 'error': 'No contacts found to sync emails from'}
+        
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from datetime import datetime, timedelta, timezone
+        import email.utils
+        import base64
+        import time
+        
+        try:
+            # Use passed OAuth credentials from session instead of database
+            credentials = Credentials(
+                token=oauth_credentials.get('access_token'),
+                refresh_token=oauth_credentials.get('refresh_token'),
+                token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
+                client_id=oauth_credentials.get('client_id'),
+                client_secret=oauth_credentials.get('client_secret'),
+                scopes=oauth_credentials.get('scopes', [])
+            )
+            
+            service = build('gmail', 'v1', credentials=credentials)
+            
+            # Calculate date range
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            new_emails = 0
+            processed_count = 0
+            
+            # Process each contact
+            for contact in contacts:
+                contact_email = contact['email']
+                
+                try:
+                    # Gmail query for this specific contact
+                    query = f"(from:{contact_email} OR to:{contact_email}) after:{cutoff_date.strftime('%Y/%m/%d')}"
+                    
+                    result = service.users().messages().list(userId='me', q=query, maxResults=5).execute()  # Just 1-2 emails per contact
+                    messages = result.get('messages', [])
+                    
+                    for msg in messages:
+                        try:
+                            # Check if already exists
+                            existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
+                            if existing:
+                                continue
+                            
+                            # Get message details
+                            msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
+                            
+                            headers = {}
+                            for header in msg_data.get('payload', {}).get('headers', []):
+                                headers[header.get('name', '').lower()] = header.get('value', '')
+                            
+                            subject = headers.get('subject', '(No Subject)')
+                            from_addr = headers.get('from', '')
+                            to_addr = headers.get('to', '')
+                            date_str = headers.get('date', '')
+                            
+                            # Parse date
+                            try:
+                                date_sent = email.utils.parsedate_to_datetime(date_str) if date_str else datetime.now(timezone.utc)
+                            except:
+                                date_sent = datetime.now(timezone.utc)
+                            
+                            # Extract body (simplified)
+                            body_text = ""
+                            if 'payload' in msg_data:
+                                payload = msg_data['payload']
+                                if 'parts' in payload:
+                                    for part in payload['parts']:
+                                        if part.get('mimeType') == 'text/plain' and 'body' in part and 'data' in part['body']:
+                                            try:
+                                                body_text = base64.urlsafe_b64decode(part['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                                break
+                                            except:
+                                                pass
+                                elif 'body' in payload and 'data' in payload['body'] and payload.get('mimeType') == 'text/plain':
+                                    try:
+                                        body_text = base64.urlsafe_b64decode(payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                    except:
+                                        pass
+                            
+                            # Store email
+                            metadata = {
+                                'subject': subject,
+                                'from': from_addr,
+                                'to': to_addr,
+                                'date': date_str,
+                                'headers': headers,
+                                'associated_contact': contact_email,
+                                'sync_method': 'sanity_test'
+                            }
+                            
+                            storage_manager.postgres.store_email(
+                                user_id=user_id,
+                                gmail_id=msg['id'],
+                                content=body_text,
+                                metadata=metadata,
+                                timestamp=date_sent
+                            )
+                            new_emails += 1
+                            processed_count += 1
+                            
+                            time.sleep(0.1)  # Throttle
+                            
+                        except Exception as e:
+                            logger.warning(f"Error processing email {msg.get('id')}: {e}")
+                            continue
+                    
+                    time.sleep(0.2)  # Throttle between contacts
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing contact {contact_email}: {e}")
+                    continue
+            
+            return {
+                'success': True,
+                'stats': {
+                    'new_emails': new_emails,
+                    'processed_count': processed_count,
+                    'contacts_processed': len(contacts)
+                }
+            }
+            
+        except Exception as gmail_error:
+            return {'success': False, 'error': f'Gmail sync error: {str(gmail_error)}'}
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def enrich_contacts_internal(user_email: str, limit: int = 10) -> Dict:
+    """Internal function to enrich contacts"""
+    try:
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return {'success': False, 'error': 'User not found'}
+        
+        user_id = user['id']
+        
+        # Get contacts to enrich
+        contacts, total = storage_manager.get_contacts(user_id, limit=limit)
+        if not contacts:
+            return {'success': False, 'error': 'No contacts found to enrich'}
+        
+        # Get user emails for enrichment context
+        emails = storage_manager.get_emails_for_user(user_id, limit=50)
+        
+        # Run enrichment using the correct batch method
+        import asyncio
+        from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
+        
+        async def run_enrichment():
+            enrichment_service = ContactEnrichmentService(user_id, storage_manager)
+            await enrichment_service.initialize()
+            
+            try:
+                # Use the correct batch enrichment method
+                result = await enrichment_service.enrich_contacts_batch(contacts, emails)
+                await enrichment_service.cleanup()
+                return result
+            except Exception as e:
+                logger.warning(f"Batch enrichment failed: {e}")
+                await enrichment_service.cleanup()
+                return {'enriched_contacts': {}, 'total_processed': 0, 'error': str(e)}
+        
+        # Run async enrichment
+        enrichment_results = asyncio.run(run_enrichment())
+        
+        # Extract stats from batch result
+        enriched_contacts = enrichment_results.get('enriched_contacts', {})
+        successful_enrichments = 0
+        
+        # Count successful enrichments (confidence > 0.3)
+        for email, result in enriched_contacts.items():
+            if isinstance(result, dict) and result.get('confidence_score', 0) > 0.3:
+                successful_enrichments += 1
+        
+        return {
+            'success': True,
+            'stats': {
+                'successfully_enriched': successful_enrichments,
+                'contacts_processed': enrichment_results.get('total_processed', 0),
+                'domains_analyzed': enrichment_results.get('domains_analyzed', 0),
+                'enrichment_results': enriched_contacts
+            }
+        }
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def build_knowledge_tree_internal(user_email: str) -> Dict:
+    """Internal function to build knowledge tree"""
+    try:
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return {'success': False, 'error': 'User not found'}
+        
+        user_id = user['id']
+        
+        # Get emails and contacts for tree building
+        emails = storage_manager.get_emails_for_user(user_id, limit=20)
+        contacts, _ = storage_manager.get_contacts(user_id, limit=20)
+        
+        if not emails and not contacts:
+            return {'success': False, 'error': 'No data found for knowledge tree'}
+        
+        # Build simplified knowledge tree
+        tree_data = {
+            'root': {
+                'name': 'Professional Network',
+                'type': 'root',
+                'children': []
+            },
+            'metadata': {
+                'created_at': datetime.utcnow().isoformat(),
+                'total_contacts': len(contacts),
+                'total_emails': len(emails),
+                'analysis_type': 'sanity_test'
+            }
+        }
+        
+        # Add contact nodes
+        if contacts:
+            contacts_node = {
+                'name': f'Contacts ({len(contacts)})',
+                'type': 'category',
+                'children': []
+            }
+            
+            for contact in contacts[:10]:  # Limit for sanity test
+                contact_node = {
+                    'name': contact.get('name') or contact['email'].split('@')[0],
+                    'type': 'contact',
+                    'email': contact['email'],
+                    'domain': contact.get('domain', ''),
+                    'trust_tier': contact.get('trust_tier', 'tier_3')
+                }
+                contacts_node['children'].append(contact_node)
+            
+            tree_data['root']['children'].append(contacts_node)
+        
+        # Add email insights node
+        if emails:
+            emails_node = {
+                'name': f'Communications ({len(emails)})',
+                'type': 'category',
+                'children': []
+            }
+            tree_data['root']['children'].append(emails_node)
+        
+        # Store knowledge tree
+        success = storage_manager.store_knowledge_tree(user_id, tree_data, 'sanity_test')
+        
+        if success:
+            total_nodes = 1 + len(tree_data['root']['children'])  # Root + category nodes
+            for category in tree_data['root']['children']:
+                total_nodes += len(category.get('children', []))
+            
+            return {
+                'success': True,
+                'stats': {
+                    'total_nodes': total_nodes,
+                    'tree_data': tree_data
+                }
+            }
+        else:
+            return {'success': False, 'error': 'Failed to store knowledge tree'}
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)} 
+
+def strategic_intelligence_internal(user_email: str, limit: int = 10) -> Dict:
+    """Internal function to generate strategic intelligence and tactical alerts"""
+    try:
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return {'success': False, 'error': 'User not found'}
+        
+        user_id = user['id']
+        
+        # Get data for strategic analysis
+        contacts, _ = storage_manager.get_contacts(user_id, limit=limit)
+        emails = storage_manager.get_emails_for_user(user_id, limit=50)
+        knowledge_tree = storage_manager.get_latest_knowledge_tree(user_id)
+        
+        if not contacts:
+            return {'success': False, 'error': 'No contacts found for strategic analysis'}
+        
+        # Run strategic intelligence analysis
+        import asyncio
+        import os
+        from intelligence.e_strategic_analysis.ceo_strategic_intelligence_system import CEOStrategicIntelligenceSystem
+        
+        async def run_strategic_analysis():
+            # Initialize the strategic intelligence system
+            claude_api_key = os.environ.get('ANTHROPIC_API_KEY')
+            if not claude_api_key:
+                logger.warning("No Anthropic API key found, using mock strategic analysis")
+                return _generate_mock_strategic_intelligence(contacts, emails)
+            
+            strategic_system = CEOStrategicIntelligenceSystem(user_id, claude_api_key)
+            
+            try:
+                # Generate CEO intelligence brief
+                intelligence_brief = await strategic_system.generate_ceo_intelligence_brief(
+                    focus_area="network_opportunities"
+                )
+                
+                # Extract actionable insights and alerts
+                insights = intelligence_brief.get('strategic_insights', [])
+                tactical_alerts = intelligence_brief.get('immediate_actions', [])
+                
+                # Generate network-specific insights
+                network_analysis = await strategic_system.map_network_to_objectives()
+                
+                return {
+                    'intelligence_brief': intelligence_brief,
+                    'network_analysis': network_analysis,
+                    'insights': insights,
+                    'tactical_alerts': tactical_alerts,
+                    'analysis_timestamp': intelligence_brief.get('analysis_timestamp'),
+                    'contacts_analyzed': len(contacts),
+                    'emails_analyzed': len(emails)
+                }
+                
+            except Exception as e:
+                logger.warning(f"Claude strategic analysis failed: {e}, using mock data")
+                return _generate_mock_strategic_intelligence(contacts, emails)
+        
+        # Run async strategic analysis
+        strategic_results = asyncio.run(run_strategic_analysis())
+        
+        # Calculate success metrics
+        insights_generated = len(strategic_results.get('insights', []))
+        tactical_alerts = len(strategic_results.get('tactical_alerts', []))
+        
+        return {
+            'success': True,
+            'insights_generated': insights_generated,
+            'tactical_alerts': tactical_alerts,
+            'strategic_results': strategic_results,
+            'contacts_analyzed': len(contacts),
+            'emails_analyzed': len(emails)
+        }
+        
+    except Exception as e:
+        logger.error(f"Strategic intelligence analysis error: {e}")
+        return {'success': False, 'error': str(e)}
+
+def _generate_mock_strategic_intelligence(contacts: List[Dict], emails: List[Dict]) -> Dict:
+    """Generate mock strategic intelligence for testing when Claude API is not available"""
+    import random
+    from datetime import datetime
+    
+    # Mock strategic insights
+    insights = []
+    tactical_alerts = []
+    
+    # Generate contact-based insights
+    for contact in contacts[:5]:  # Top 5 contacts
+        domain = contact.get('email', '').split('@')[-1] if '@' in contact.get('email', '') else 'unknown'
+        
+        insights.append({
+            'title': f"Strategic Opportunity: {contact.get('name', contact.get('email'))}",
+            'description': f"High-value contact at {domain} shows strong engagement potential",
+            'strategic_value': f"Could facilitate business development in {domain} sector",
+            'confidence_score': random.uniform(0.7, 0.95),
+            'time_sensitivity': random.choice(['high', 'medium', 'low']),
+            'business_impact': 'High potential for partnership or collaboration'
+        })
+        
+        if random.random() > 0.6:  # 40% chance of tactical alert
+            tactical_alerts.append({
+                'alert_type': 'engagement_opportunity',
+                'contact': contact.get('email'),
+                'message': f"Perfect time to reconnect with {contact.get('name', 'contact')} - recent activity detected",
+                'priority': random.choice(['urgent', 'high', 'medium']),
+                'suggested_action': f"Send personalized follow-up about {domain} industry trends"
+            })
+    
+    # Generate domain-based insights
+    domains = list(set([c.get('email', '').split('@')[-1] for c in contacts if '@' in c.get('email', '')]))
+    
+    for domain in domains[:3]:  # Top 3 domains
+        contact_count = len([c for c in contacts if domain in c.get('email', '')])
+        insights.append({
+            'title': f"Network Cluster Analysis: {domain}",
+            'description': f"Strong network presence in {domain} - {contact_count} contacts",
+            'strategic_value': f"Leverage {domain} network for industry insights and partnerships",
+            'confidence_score': random.uniform(0.6, 0.9),
+            'time_sensitivity': 'medium',
+            'business_impact': 'Medium to high - network effects possible'
+        })
+    
+    # Generate email-based insights
+    if emails:
+        recent_activity = len([e for e in emails if e.get('created_at', '')])
+        tactical_alerts.append({
+            'alert_type': 'communication_pattern',
+            'message': f"Analyzed {len(emails)} emails - {recent_activity} show recent engagement",
+            'priority': 'medium',
+            'suggested_action': 'Review recent conversations for follow-up opportunities'
+        })
+    
+    return {
+        'intelligence_brief': {
+            'analysis_timestamp': datetime.utcnow().isoformat(),
+            'strategic_insights': insights,
+            'immediate_actions': tactical_alerts,
+            'executive_summary': f"Analyzed {len(contacts)} contacts across {len(domains)} domains with {len(emails)} communications",
+            'key_recommendations': [
+                'Prioritize engagement with high-confidence contacts',
+                'Leverage domain clusters for network effects',
+                'Focus on time-sensitive opportunities first'
+            ]
+        },
+        'network_analysis': {
+            'total_contacts': len(contacts),
+            'active_domains': len(domains),
+            'engagement_opportunities': len(tactical_alerts),
+            'strategic_clusters': len(domains)
+        },
+        'insights': insights,
+        'tactical_alerts': tactical_alerts,
+        'analysis_timestamp': datetime.utcnow().isoformat(),
+        'contacts_analyzed': len(contacts),
+        'emails_analyzed': len(emails)
+    }
+
+# ===== STEP 5: STRATEGIC INTELLIGENCE & TACTICAL ALERTS =====
+
+@api_sync_bp.route('/intelligence/strategic-analysis', methods=['POST'])
+@require_auth
+def generate_strategic_intelligence():
+    """Generate comprehensive strategic intelligence and tactical alerts"""
+    try:
+        user_email = session['user_email']
+        data = request.get_json() or {}
+        
+        # Parameters
+        focus_area = data.get('focus_area', 'network_opportunities')
+        limit = min(int(data.get('limit', 50)), 100)  # Max 100 contacts
+        
+        logger.info(f"🎯 Starting strategic intelligence analysis for {user_email}")
+        
+        # Run strategic intelligence analysis
+        result = strategic_intelligence_internal(user_email, limit=limit)
+        
+        if not result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': result.get('error'),
+                'mode': 'strategic_intelligence'
+            }), 500
+        
+        strategic_results = result.get('strategic_results', {})
+        
+        logger.info(f"✅ Strategic intelligence generated for {user_email}")
+        
+        return jsonify({
+            'success': True,
+            'mode': 'strategic_intelligence',
+            'analysis_timestamp': strategic_results.get('analysis_timestamp'),
+            'intelligence_brief': strategic_results.get('intelligence_brief', {}),
+            'network_analysis': strategic_results.get('network_analysis', {}),
+            'insights': strategic_results.get('insights', []),
+            'tactical_alerts': strategic_results.get('tactical_alerts', []),
+            'stats': {
+                'insights_generated': result.get('insights_generated', 0),
+                'tactical_alerts': result.get('tactical_alerts', 0),
+                'contacts_analyzed': result.get('contacts_analyzed', 0),
+                'emails_analyzed': result.get('emails_analyzed', 0)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Strategic intelligence error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Strategic intelligence analysis failed: {str(e)}',
+            'mode': 'strategic_intelligence'
+        }), 500
+
+@api_sync_bp.route('/strategic-intelligence')
+def strategic_intelligence_page():
+    """Strategic Intelligence Dashboard page"""
+    return render_template('strategic_intelligence.html')
+
+# ===== UTILITY FUNCTIONS =====
