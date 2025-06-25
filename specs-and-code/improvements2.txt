@@ -1,0 +1,2251 @@
+
+# AI Agent Implementation Guide: Strategic Intelligence Enhancements
+
+## Overview
+This guide provides specific implementation instructions for adding the recommended enhancements to the existing intelligence system. Each enhancement includes the exact file locations, code structure, and integration points.
+
+## 1. Predictive Relationship Decay System
+
+### Create New File: `intelligence/g_realtime_updates/relationship_decay_predictor.py`
+
+```python
+"""
+Predictive Relationship Decay System
+===================================
+Predicts when relationships need maintenance before they deteriorate.
+Integrates with behavioral intelligence and communication patterns.
+"""
+
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+
+from utils.logging import structured_logger as logger
+from models.database import get_db_manager
+
+class DecayRiskLevel(Enum):
+    CRITICAL = "critical"  # Immediate action needed
+    HIGH = "high"         # Action needed within days
+    MEDIUM = "medium"     # Monitor closely
+    LOW = "low"           # Healthy relationship
+
+@dataclass
+class DecayRisk:
+    contact_email: str
+    risk_level: DecayRiskLevel
+    days_until_dormant: int
+    last_interaction: datetime
+    peak_communication_days: List[int]  # Best days to reach out
+    recommended_action: str
+    optimal_timing: datetime
+    confidence_score: float
+    risk_factors: List[str]
+
+class RelationshipDecayPredictor:
+    """Predict relationship decay before it happens"""
+    
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.decay_thresholds = {
+            'high_value_contact': 14,      # Days before considered at risk
+            'regular_contact': 30,
+            'periodic_contact': 60,
+            'dormant_threshold': 90        # Days before marked dormant
+        }
+    
+    async def analyze_all_relationships(self) -> List[DecayRisk]:
+        """Analyze all relationships and predict decay risks"""
+        db_manager = get_db_manager()
+        
+        # Get all active relationships
+        contacts = await db_manager.get_user_contacts(
+            self.user_id,
+            relationship_status=['established', 'ongoing']
+        )
+        
+        decay_risks = []
+        for contact in contacts:
+            risk = await self.predict_decay_risk(contact)
+            if risk and risk.risk_level in [DecayRiskLevel.HIGH, DecayRiskLevel.CRITICAL]:
+                decay_risks.append(risk)
+        
+        # Sort by risk level and days until dormant
+        decay_risks.sort(key=lambda x: (x.risk_level.value, x.days_until_dormant))
+        
+        return decay_risks
+    
+    async def predict_decay_risk(self, contact: Dict) -> Optional[DecayRisk]:
+        """Predict decay risk for a single contact"""
+        email = contact.get('email')
+        
+        # Get communication history
+        comm_history = await self._get_communication_history(email)
+        if not comm_history:
+            return None
+        
+        # Calculate communication patterns
+        patterns = self._analyze_communication_patterns(comm_history)
+        
+        # Determine risk level
+        risk_level, days_until_dormant = self._calculate_risk_level(patterns, contact)
+        
+        # Get behavioral insights for optimal timing
+        behavioral_insights = await self._get_behavioral_insights(email)
+        
+        # Generate recommended action
+        recommended_action = self._generate_recommendation(
+            risk_level, patterns, contact, behavioral_insights
+        )
+        
+        # Calculate optimal reach-out time
+        optimal_timing = self._calculate_optimal_timing(
+            behavioral_insights, patterns, risk_level
+        )
+        
+        return DecayRisk(
+            contact_email=email,
+            risk_level=risk_level,
+            days_until_dormant=days_until_dormant,
+            last_interaction=patterns['last_interaction'],
+            peak_communication_days=behavioral_insights.get('peak_hours', []),
+            recommended_action=recommended_action,
+            optimal_timing=optimal_timing,
+            confidence_score=patterns['pattern_confidence'],
+            risk_factors=self._identify_risk_factors(patterns, contact)
+        )
+    
+    def _analyze_communication_patterns(self, history: List[Dict]) -> Dict:
+        """Analyze communication frequency and patterns"""
+        if not history:
+            return {}
+        
+        # Sort by date
+        history.sort(key=lambda x: x['timestamp'])
+        
+        # Calculate intervals between communications
+        intervals = []
+        for i in range(1, len(history)):
+            interval = (history[i]['timestamp'] - history[i-1]['timestamp']).days
+            intervals.append(interval)
+        
+        # Calculate pattern metrics
+        avg_interval = sum(intervals) / len(intervals) if intervals else 999
+        
+        # Detect if intervals are increasing (relationship cooling)
+        interval_trend = 'stable'
+        if len(intervals) >= 3:
+            recent_avg = sum(intervals[-3:]) / 3
+            older_avg = sum(intervals[:-3]) / len(intervals[:-3])
+            if recent_avg > older_avg * 1.5:
+                interval_trend = 'increasing'  # Relationship cooling
+            elif recent_avg < older_avg * 0.7:
+                interval_trend = 'decreasing'  # Relationship warming
+        
+        # Response rate trend
+        response_rates = self._calculate_response_rates(history)
+        
+        return {
+            'last_interaction': history[-1]['timestamp'] if history else None,
+            'average_interval_days': avg_interval,
+            'interval_trend': interval_trend,
+            'total_interactions': len(history),
+            'response_rate_trend': response_rates,
+            'pattern_confidence': min(len(history) / 10, 1.0)  # More data = higher confidence
+        }
+    
+    def _calculate_risk_level(self, patterns: Dict, contact: Dict) -> Tuple[DecayRiskLevel, int]:
+        """Calculate decay risk level and days until dormant"""
+        if not patterns.get('last_interaction'):
+            return DecayRiskLevel.CRITICAL, 0
+        
+        days_since_last = (datetime.utcnow() - patterns['last_interaction']).days
+        avg_interval = patterns['average_interval_days']
+        
+        # Determine expected next interaction
+        expected_days_until_next = avg_interval - days_since_last
+        
+        # Factor in relationship value
+        contact_value = contact.get('strategic_value', 'medium')
+        threshold = self.decay_thresholds.get(f'{contact_value}_contact', 30)
+        
+        # Calculate risk based on patterns
+        if patterns['interval_trend'] == 'increasing':
+            # Relationship already cooling - higher risk
+            expected_days_until_next *= 0.7
+        
+        if expected_days_until_next < 0:
+            # Overdue for contact
+            if abs(expected_days_until_next) > threshold:
+                return DecayRiskLevel.CRITICAL, 0
+            else:
+                return DecayRiskLevel.HIGH, max(0, threshold + expected_days_until_next)
+        elif expected_days_until_next < threshold * 0.5:
+            return DecayRiskLevel.MEDIUM, expected_days_until_next
+        else:
+            return DecayRiskLevel.LOW, expected_days_until_next
+        
+    async def _get_behavioral_insights(self, email: str) -> Dict:
+        """Get behavioral insights for optimal contact timing"""
+        # This would integrate with behavioral_intelligence_system.py
+        from intelligence.b_data_collection.behavioral_intelligence_system import BehavioralIntelligenceSystem
+        
+        behavioral_system = BehavioralIntelligenceSystem(self.user_id)
+        profile = await behavioral_system.get_behavioral_profile(email)
+        
+        if profile:
+            return {
+                'peak_hours': profile.preferred_communication_times,
+                'communication_style': profile.primary_style.value,
+                'response_time_hours': profile.avg_response_time_hours,
+                'weekend_responsive': profile.weekend_activity
+            }
+        
+        return {}
+    
+    def _generate_recommendation(self, risk_level: DecayRiskLevel, patterns: Dict, 
+                               contact: Dict, behavioral: Dict) -> str:
+        """Generate specific action recommendation"""
+        
+        if risk_level == DecayRiskLevel.CRITICAL:
+            # Urgent re-engagement needed
+            style = behavioral.get('communication_style', 'unknown')
+            if style == 'relationship':
+                return "Send personal check-in: 'It's been too long! How have things been with [recent project/interest]?'"
+            elif style == 'analytical':
+                return "Share relevant data/insight: 'Saw this analysis on [their interest] and thought of our discussion'"
+            else:
+                return "Send value-add: 'Came across this [article/opportunity] that might interest you'"
+                
+        elif risk_level == DecayRiskLevel.HIGH:
+            # Proactive maintenance needed
+            if patterns['interval_trend'] == 'increasing':
+                return "Relationship cooling - schedule coffee/call: 'Would love to catch up on [mutual interest]'"
+            else:
+                return "Maintain momentum: Share update on [previous discussion topic]"
+                
+        else:
+            # Routine maintenance
+            return "Add to next newsletter/update batch or wait for natural opportunity"
+    
+    def _calculate_optimal_timing(self, behavioral: Dict, patterns: Dict, 
+                                risk_level: DecayRiskLevel) -> datetime:
+        """Calculate optimal time to reach out"""
+        # Start with base timing
+        if risk_level == DecayRiskLevel.CRITICAL:
+            base_date = datetime.utcnow()  # Today
+        elif risk_level == DecayRiskLevel.HIGH:
+            base_date = datetime.utcnow() + timedelta(days=2)  # Within 2 days
+        else:
+            base_date = datetime.utcnow() + timedelta(days=7)  # Within a week
+        
+        # Adjust for behavioral patterns
+        peak_hours = behavioral.get('peak_hours', [9, 14])  # Default business hours
+        
+        # Find next occurrence of peak day/time
+        current_date = base_date
+        for _ in range(7):  # Look up to 7 days ahead
+            if current_date.hour in peak_hours:
+                if not behavioral.get('weekend_responsive', True) and current_date.weekday() >= 5:
+                    current_date += timedelta(days=1)
+                    continue
+                return current_date
+            current_date += timedelta(hours=1)
+        
+        return base_date  # Fallback
+    
+    def _identify_risk_factors(self, patterns: Dict, contact: Dict) -> List[str]:
+        """Identify specific risk factors"""
+        factors = []
+        
+        if patterns.get('interval_trend') == 'increasing':
+            factors.append("Communication frequency declining")
+        
+        if patterns.get('response_rate_trend', {}).get('trend') == 'declining':
+            factors.append("Response rate dropping")
+        
+        days_since = (datetime.utcnow() - patterns.get('last_interaction', datetime.utcnow())).days
+        if days_since > patterns.get('average_interval_days', 30) * 2:
+            factors.append(f"No contact for {days_since} days (2x normal interval)")
+        
+        if contact.get('strategic_value') == 'high' and days_since > 30:
+            factors.append("High-value relationship at risk")
+        
+        return factors
+    
+    def _calculate_response_rates(self, history: List[Dict]) -> Dict:
+        """Calculate response rate trends"""
+        # Implementation would analyze response patterns
+        # This is a simplified version
+        return {
+            'current_rate': 0.75,
+            'trend': 'stable',
+            'confidence': 0.8
+        }
+```
+
+### Integration Point 1: Add to `intelligence/g_realtime_updates/tactical_alerts_system.py`
+
+```python
+# At the top of the file, add import:
+from .relationship_decay_predictor import RelationshipDecayPredictor, DecayRiskLevel
+
+# Add new method to TacticalAlertsSystem class:
+async def check_relationship_decay_risks(self) -> List[Dict]:
+    """Check for relationships at risk of decay"""
+    predictor = RelationshipDecayPredictor(self.user_id)
+    decay_risks = await predictor.analyze_all_relationships()
+    
+    # Convert to alerts
+    alerts = []
+    for risk in decay_risks:
+        if risk.risk_level == DecayRiskLevel.CRITICAL:
+            priority = 'high'
+            urgency = 'immediate'
+        elif risk.risk_level == DecayRiskLevel.HIGH:
+            priority = 'medium'
+            urgency = 'soon'
+        else:
+            priority = 'low'
+            urgency = 'scheduled'
+        
+        alert = {
+            'id': f'decay_risk_{risk.contact_email}_{datetime.utcnow().timestamp()}',
+            'type': 'relationship_decay_warning',
+            'priority': priority,
+            'urgency': urgency,
+            'contact_email': risk.contact_email,
+            'title': f'Relationship at risk: {risk.contact_email}',
+            'description': risk.recommended_action,
+            'risk_factors': risk.risk_factors,
+            'optimal_action_time': risk.optimal_timing.isoformat(),
+            'confidence': risk.confidence_score,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        alerts.append(alert)
+    
+    return alerts
+
+# Modify the generate_tactical_alerts method to include decay checks:
+async def generate_tactical_alerts(self) -> List[Dict]:
+    """Generate all tactical alerts including relationship decay"""
+    alerts = []
+    
+    # ... existing alert generation code ...
+    
+    # Add relationship decay checks
+    decay_alerts = await self.check_relationship_decay_risks()
+    alerts.extend(decay_alerts)
+    
+    return alerts
+```
+
+### Integration Point 2: Add to `api/routes.py`
+
+```python
+# Add new endpoint for relationship health monitoring
+@app.route('/api/intelligence/relationship-health', methods=['GET'])
+@require_auth
+async def get_relationship_health(user_id: int):
+    """Get relationship decay predictions and health metrics"""
+    try:
+        predictor = RelationshipDecayPredictor(user_id)
+        decay_risks = await predictor.analyze_all_relationships()
+        
+        # Group by risk level
+        risk_summary = {
+            'critical': [],
+            'high': [],
+            'medium': [],
+            'total_at_risk': 0
+        }
+        
+        for risk in decay_risks:
+            risk_data = {
+                'email': risk.contact_email,
+                'days_until_dormant': risk.days_until_dormant,
+                'last_interaction': risk.last_interaction.isoformat(),
+                'recommended_action': risk.recommended_action,
+                'optimal_timing': risk.optimal_timing.isoformat(),
+                'risk_factors': risk.risk_factors
+            }
+            
+            if risk.risk_level == DecayRiskLevel.CRITICAL:
+                risk_summary['critical'].append(risk_data)
+            elif risk.risk_level == DecayRiskLevel.HIGH:
+                risk_summary['high'].append(risk_data)
+            elif risk.risk_level == DecayRiskLevel.MEDIUM:
+                risk_summary['medium'].append(risk_data)
+        
+        risk_summary['total_at_risk'] = len(decay_risks)
+        
+        return jsonify({
+            'success': True,
+            'relationship_health': risk_summary,
+            'generated_at': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get relationship health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+```
+
+## 2. Conversational Memory System
+
+### Create New File: `intelligence/f_knowledge_integration/conversational_memory.py`
+
+```python
+"""
+Conversational Memory System
+===========================
+Tracks conversation context, commitments, and open loops across all communications.
+"""
+
+import re
+import json
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass, field
+from enum import Enum
+
+from utils.logging import structured_logger as logger
+from models.database import get_db_manager
+
+class CommitmentStatus(Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    OVERDUE = "overdue"
+    CANCELLED = "cancelled"
+
+class ConversationTopic(Enum):
+    PROJECT = "project"
+    INTRODUCTION = "introduction"
+    FOLLOW_UP = "follow_up"
+    INFORMATION = "information"
+    DECISION = "decision"
+    MEETING = "meeting"
+
+@dataclass
+class Commitment:
+    id: str
+    type: str  # "promise", "request", "follow_up"
+    description: str
+    from_email: str
+    to_email: str
+    made_date: datetime
+    due_date: Optional[datetime]
+    status: CommitmentStatus
+    related_emails: List[str]  # Email IDs
+    completed_date: Optional[datetime] = None
+    evidence: Optional[str] = None
+
+@dataclass
+class ConversationThread:
+    topic: str
+    participants: Set[str]
+    start_date: datetime
+    last_activity: datetime
+    status: str  # "active", "waiting", "resolved", "stalled"
+    key_points: List[str]
+    open_questions: List[str]
+    decisions_made: List[str]
+    next_steps: List[str]
+    email_chain: List[str]  # Email IDs in chronological order
+
+@dataclass
+class ConversationalContext:
+    contact_email: str
+    active_threads: List[ConversationThread]
+    commitments_made: List[Commitment]  # Promises you made
+    commitments_received: List[Commitment]  # Promises they made
+    topics_discussed: Dict[str, datetime]  # Topic -> Last discussed
+    communication_preferences: Dict[str, Any]
+    relationship_notes: List[Dict[str, Any]]  # Timestamped notes
+
+class ConversationalMemory:
+    """Track ongoing conversations and commitments across all communications"""
+    
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.commitment_patterns = [
+            # Promises made
+            (r"i(?:'ll| will) (?:introduce|connect) you (?:to|with) (\w+)", "introduction"),
+            (r"i(?:'ll| will) (?:send|share|provide) (?:you )?(?:the |that )?(\w+)", "send_item"),
+            (r"(?:let's|we should|i'll) (?:revisit|review|discuss) (?:this |it )?(?:in|next|by) (\w+)", "follow_up"),
+            (r"i(?:'ll| will) (?:get back|respond|reply) (?:to you )?by (\w+)", "response_promise"),
+            
+            # Requests received
+            (r"(?:could|can|would) you (?:please )?(?:send|share|provide) (?:me )?(?:the |that )?(\w+)", "request_item"),
+            (r"(?:please )?(?:let me know|tell me|update me) (?:about|on|if) (.*?)(?:\?|$)", "request_info"),
+            (r"(?:looking forward to|waiting for|need) (?:your |the )?(\w+)", "awaiting_item"),
+        ]
+        
+        self.conversation_patterns = [
+            (r"(?:regarding|about|concerning|re:) (.*?)(?:\.|,|$)", ConversationTopic.PROJECT),
+            (r"(?:meet|meeting|call|discussion) (?:about|on|to discuss) (.*?)(?:\.|,|$)", ConversationTopic.MEETING),
+            (r"(?:decide|decision|approval) (?:on|about|for) (.*?)(?:\.|,|$)", ConversationTopic.DECISION),
+        ]
+    
+    async def extract_commitments_from_email(self, email: Dict) -> List[Commitment]:
+        """Extract commitments from a single email"""
+        commitments = []
+        
+        content = email.get('body_text', '') + ' ' + email.get('subject', '')
+        sender = email.get('sender', '')
+        recipients = email.get('recipients', [])
+        email_id = email.get('id')
+        email_date = datetime.fromisoformat(email.get('email_date', datetime.utcnow().isoformat()))
+        
+        # Check each commitment pattern
+        for pattern, commitment_type in self.commitment_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                # Determine if this is a promise (from sender) or request (to sender)
+                is_promise = sender == self.user_id  # Simplified - would need user email
+                
+                commitment = Commitment(
+                    id=f"commit_{email_id}_{match.start()}",
+                    type=commitment_type,
+                    description=match.group(0),
+                    from_email=sender if is_promise else recipients[0] if recipients else '',
+                    to_email=recipients[0] if is_promise and recipients else sender,
+                    made_date=email_date,
+                    due_date=self._extract_due_date(match.group(0), email_date),
+                    status=CommitmentStatus.PENDING,
+                    related_emails=[email_id]
+                )
+                commitments.append(commitment)
+        
+        return commitments
+    
+    async def track_conversation_thread(self, emails: List[Dict]) -> List[ConversationThread]:
+        """Identify and track conversation threads"""
+        threads = {}
+        
+        # Group emails by subject thread
+        for email in emails:
+            subject = email.get('subject', '')
+            thread_subject = self._normalize_subject(subject)
+            
+            if thread_subject not in threads:
+                threads[thread_subject] = ConversationThread(
+                    topic=thread_subject,
+                    participants=set(),
+                    start_date=datetime.fromisoformat(email.get('email_date', datetime.utcnow().isoformat())),
+                    last_activity=datetime.fromisoformat(email.get('email_date', datetime.utcnow().isoformat())),
+                    status='active',
+                    key_points=[],
+                    open_questions=[],
+                    decisions_made=[],
+                    next_steps=[],
+                    email_chain=[]
+                )
+            
+            thread = threads[thread_subject]
+            thread.participants.add(email.get('sender', ''))
+            thread.participants.update(email.get('recipients', []))
+            thread.email_chain.append(email.get('id'))
+            thread.last_activity = max(
+                thread.last_activity,
+                datetime.fromisoformat(email.get('email_date', datetime.utcnow().isoformat()))
+            )
+            
+            # Extract key information from email content
+            content = email.get('body_text', '')
+            thread.key_points.extend(self._extract_key_points(content))
+            thread.open_questions.extend(self._extract_questions(content))
+            thread.decisions_made.extend(self._extract_decisions(content))
+            thread.next_steps.extend(self._extract_next_steps(content))
+        
+        # Determine thread status
+        for thread in threads.values():
+            thread.status = self._determine_thread_status(thread)
+        
+        return list(threads.values())
+    
+    async def check_commitment_completion(self, commitment: Commitment, recent_emails: List[Dict]) -> bool:
+        """Check if a commitment has been completed based on recent emails"""
+        # Look for evidence of completion in recent emails
+        for email in recent_emails:
+            if email.get('sender') == commitment.from_email:
+                content = email.get('body_text', '') + ' ' + email.get('subject', '')
+                
+                # Check for completion indicators
+                if commitment.type == 'introduction':
+                    if 'meet' in content and any(name in content for name in commitment.description.split()):
+                        commitment.status = CommitmentStatus.COMPLETED
+                        commitment.completed_date = datetime.fromisoformat(email.get('email_date'))
+                        commitment.evidence = f"Introduction made in email {email.get('id')}"
+                        return True
+                
+                elif commitment.type == 'send_item':
+                    item_keywords = commitment.description.split()[-1]  # Last word usually item
+                    if item_keywords in content and ('attached' in content or 'here is' in content):
+                        commitment.status = CommitmentStatus.COMPLETED
+                        commitment.completed_date = datetime.fromisoformat(email.get('email_date'))
+                        commitment.evidence = f"Item sent in email {email.get('id')}"
+                        return True
+        
+        # Check if overdue
+        if commitment.due_date and datetime.utcnow() > commitment.due_date:
+            commitment.status = CommitmentStatus.OVERDUE
+        
+        return False
+    
+    async def get_conversation_context(self, contact_email: str) -> ConversationalContext:
+        """Get complete conversational context for a contact"""
+        db_manager = get_db_manager()
+        
+        # Get recent emails with this contact
+        emails = await db_manager.get_emails_with_contact(self.user_id, contact_email, limit=50)
+        
+        # Extract commitments
+        all_commitments = []
+        for email in emails:
+            commitments = await self.extract_commitments_from_email(email)
+            all_commitments.extend(commitments)
+        
+        # Check completion status
+        for commitment in all_commitments:
+            await self.check_commitment_completion(commitment, emails)
+        
+        # Track conversation threads
+        threads = await self.track_conversation_thread(emails)
+        
+        # Separate commitments made vs received
+        commitments_made = [c for c in all_commitments if c.from_email == self.user_id]
+        commitments_received = [c for c in all_commitments if c.to_email == self.user_id]
+        
+        # Extract topics discussed
+        topics_discussed = {}
+        for email in emails:
+            topics = self._extract_topics(email.get('body_text', ''))
+            for topic in topics:
+                topics_discussed[topic] = datetime.fromisoformat(email.get('email_date'))
+        
+        return ConversationalContext(
+            contact_email=contact_email,
+            active_threads=[t for t in threads if t.status == 'active'],
+            commitments_made=commitments_made,
+            commitments_received=commitments_received,
+            topics_discussed=topics_discussed,
+            communication_preferences=await self._get_communication_preferences(contact_email),
+            relationship_notes=await self._get_relationship_notes(contact_email)
+        )
+    
+    async def generate_conversation_continuity_prompt(self, contact_email: str) -> Dict:
+        """Generate context for composing emails with conversation continuity"""
+        context = await self.get_conversation_context(contact_email)
+        
+        prompt_data = {
+            'last_discussed': [],
+            'open_loops': [],
+            'pending_commitments': [],
+            'their_concerns': [],
+            'next_steps': []
+        }
+        
+        # Last discussed topics
+        recent_topics = sorted(
+            context.topics_discussed.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:3]
+        prompt_data['last_discussed'] = [
+            f"{topic} ({days_ago} days ago)"
+            for topic, date in recent_topics
+            for days_ago in [(datetime.utcnow() - date).days]
+        ]
+        
+        # Open loops (pending commitments)
+        for commitment in context.commitments_made:
+            if commitment.status == CommitmentStatus.PENDING:
+                prompt_data['open_loops'].append(commitment.description)
+            elif commitment.status == CommitmentStatus.OVERDUE:
+                prompt_data['pending_commitments'].append(
+                    f"OVERDUE: {commitment.description} (due {commitment.due_date})"
+                )
+        
+        # Their concerns (from open questions in threads)
+        for thread in context.active_threads:
+            prompt_data['their_concerns'].extend(thread.open_questions[:2])
+        
+        # Next steps
+        for thread in context.active_threads:
+            prompt_data['next_steps'].extend(thread.next_steps[:2])
+        
+        return prompt_data
+    
+    def _normalize_subject(self, subject: str) -> str:
+        """Normalize email subject for thread grouping"""
+        # Remove Re:, Fwd:, etc.
+        normalized = re.sub(r'^(re:|fwd:|fw:)\s*', '', subject.lower().strip())
+        # Remove extra spaces
+        normalized = ' '.join(normalized.split())
+        return normalized
+    
+    def _extract_due_date(self, text: str, base_date: datetime) -> Optional[datetime]:
+        """Extract due date from commitment text"""
+        # Simple patterns for now
+        patterns = {
+            r'by (\w+day)': 1,  # by Monday
+            r'(?:in|within) (\d+) days?': 2,  # in 3 days
+            r'(?:in|within) (\d+) weeks?': 3,  # in 2 weeks
+            r'next (\w+)': 4,  # next week
+            r'by end of (\w+)': 5,  # by end of month
+        }
+        
+        for pattern, pattern_type in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                if pattern_type == 2:  # days
+                    return base_date + timedelta(days=int(match.group(1)))
+                elif pattern_type == 3:  # weeks
+                    return base_date + timedelta(weeks=int(match.group(1)))
+                # Add more sophisticated date parsing as needed
+        
+        return None
+    
+    def _extract_key_points(self, content: str) -> List[str]:
+        """Extract key points from email content"""
+        key_points = []
+        
+        # Look for bullet points or numbered lists
+        bullets = re.findall(r'(?:^|\n)\s*[-•*]\s*(.+)', content)
+        key_points.extend(bullets[:3])
+        
+        # Look for emphasized points
+        emphasized = re.findall(r'(?:important|key|critical|note):\s*(.+?)(?:\.|$)', content, re.IGNORECASE)
+        key_points.extend(emphasized[:2])
+        
+        return key_points
+    
+    def _extract_questions(self, content: str) -> List[str]:
+        """Extract questions from email content"""
+        questions = re.findall(r'([^.!]+\?)', content)
+        # Filter out very short questions
+        return [q.strip() for q in questions if len(q.strip()) > 10][:3]
+    
+    def _extract_decisions(self, content: str) -> List[str]:
+        """Extract decisions from email content"""
+        decision_patterns = [
+            r'(?:decided|agreed|confirmed) (?:to |that |on )(.+?)(?:\.|$)',
+            r'(?:decision|agreement):\s*(.+?)(?:\.|$)',
+            r'(?:we will|we\'ll|going to) (.+?)(?:\.|$)',
+        ]
+        
+        decisions = []
+        for pattern in decision_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            decisions.extend(matches)
+        
+        return decisions[:3]
+    
+    def _extract_next_steps(self, content: str) -> List[str]:
+        """Extract next steps from email content"""
+        next_step_patterns = [
+            r'next steps?:\s*(.+?)(?:\.|$)',
+            r'(?:action items?|todo):\s*(.+?)(?:\.|$)',
+            r'(?:will|need to|should) (.+?)(?:\.|$)',
+        ]
+        
+        steps = []
+        for pattern in next_step_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            steps.extend(matches)
+        
+        return steps[:3]
+    
+    def _extract_topics(self, content: str) -> List[str]:
+        """Extract main topics from content"""
+        topics = []
+        
+        for pattern, topic_type in self.conversation_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            topics.extend([match.strip() for match in matches])
+        
+        return list(set(topics))[:5]
+    
+    def _determine_thread_status(self, thread: ConversationThread) -> str:
+        """Determine the status of a conversation thread"""
+        days_inactive = (datetime.utcnow() - thread.last_activity).days
+        
+        if days_inactive > 30:
+            return 'stalled'
+        elif thread.open_questions and days_inactive > 7:
+            return 'waiting'
+        elif thread.decisions_made and not thread.next_steps:
+            return 'resolved'
+        else:
+            return 'active'
+    
+    async def _get_communication_preferences(self, contact_email: str) -> Dict:
+        """Get learned communication preferences for a contact"""
+        # This would integrate with behavioral intelligence
+        return {
+            'preferred_channel': 'email',
+            'response_time': 'within 24 hours',
+            'communication_style': 'formal',
+            'best_time': 'morning'
+        }
+    
+    async def _get_relationship_notes(self, contact_email: str) -> List[Dict]:
+        """Get relationship notes and important context"""
+        # Would fetch from database
+        return []
+```
+
+### Integration Point 1: Add to `intelligence/f_knowledge_integration/knowledge_tree_orchestrator.py`
+
+```python
+# Add import at the top
+from .conversational_memory import ConversationalMemory
+
+# Add method to KnowledgeTreeOrchestrator class:
+async def enrich_with_conversational_memory(self, knowledge_tree: Dict) -> Dict:
+    """Enrich knowledge tree with conversational memory"""
+    memory_system = ConversationalMemory(self.user_id)
+    
+    # Add conversational context for each contact
+    if 'relationships' in knowledge_tree:
+        for email, relationship in knowledge_tree['relationships'].items():
+            try:
+                context = await memory_system.get_conversation_context(email)
+                
+                # Add conversation intelligence
+                relationship['conversation_intelligence'] = {
+                    'active_threads': len(context.active_threads),
+                    'pending_commitments': len([c for c in context.commitments_made 
+                                               if c.status == CommitmentStatus.PENDING]),
+                    'overdue_commitments': len([c for c in context.commitments_made 
+                                               if c.status == CommitmentStatus.OVERDUE]),
+                    'last_topics': list(context.topics_discussed.keys())[:3],
+                    'open_questions': sum(len(t.open_questions) for t in context.active_threads)
+                }
+                
+                # Add specific commitment details for high-value relationships
+                if relationship.get('status') == 'ESTABLISHED':
+                    relationship['commitments'] = {
+                        'made': [{'description': c.description, 
+                                 'due': c.due_date.isoformat() if c.due_date else None,
+                                 'status': c.status.value}
+                                for c in context.commitments_made[:3]],
+                        'received': [{'description': c.description,
+                                     'status': c.status.value}
+                                    for c in context.commitments_received[:3]]
+                    }
+                    
+            except Exception as e:
+                logger.warning(f"Failed to add conversational memory for {email}: {e}")
+    
+    return knowledge_tree
+
+# Modify the build_knowledge_tree method to include conversational memory:
+async def build_knowledge_tree(self, time_window_days: int = 30) -> Dict:
+    """Build knowledge tree with conversational memory"""
+    # ... existing code ...
+    
+    # After building base knowledge tree
+    knowledge_tree = await self._build_base_knowledge_tree(emails)
+    
+    # Enrich with conversational memory
+    knowledge_tree = await self.enrich_with_conversational_memory(knowledge_tree)
+    
+    return knowledge_tree
+```
+
+### Integration Point 2: Add to `api/routes.py`
+
+```python
+# Add endpoint for email composition context
+@app.route('/api/intelligence/conversation-context/<contact_email>', methods=['GET'])
+@require_auth
+async def get_conversation_context(user_id: int, contact_email: str):
+    """Get conversational context for email composition"""
+    try:
+        memory_system = ConversationalMemory(user_id)
+        context = await memory_system.generate_conversation_continuity_prompt(contact_email)
+        
+        return jsonify({
+            'success': True,
+            'context': context,
+            'contact_email': contact_email
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get conversation context: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Add endpoint for commitment tracking
+@app.route('/api/intelligence/commitments', methods=['GET'])
+@require_auth
+async def get_commitments(user_id: int):
+    """Get all pending commitments"""
+    try:
+        memory_system = ConversationalMemory(user_id)
+        db_manager = get_db_manager()
+        
+        # Get all contacts
+        contacts = await db_manager.get_user_contacts(user_id)
+        
+        all_commitments = []
+        for contact in contacts[:50]:  # Limit for performance
+            context = await memory_system.get_conversation_context(contact['email'])
+            
+            for commitment in context.commitments_made:
+                if commitment.status in [CommitmentStatus.PENDING, CommitmentStatus.OVERDUE]:
+                    all_commitments.append({
+                        'id': commitment.id,
+                        'type': commitment.type,
+                        'description': commitment.description,
+                        'to': commitment.to_email,
+                        'made_date': commitment.made_date.isoformat(),
+                        'due_date': commitment.due_date.isoformat() if commitment.due_date else None,
+                        'status': commitment.status.value,
+                        'overdue_days': (datetime.utcnow() - commitment.due_date).days 
+                                       if commitment.due_date and commitment.status == CommitmentStatus.OVERDUE else 0
+                    })
+        
+        # Sort by urgency
+        all_commitments.sort(key=lambda x: (
+            0 if x['status'] == 'overdue' else 1,
+            x.get('overdue_days', 0),
+            x['due_date'] or '9999-12-31'
+        ))
+        
+        return jsonify({
+            'success': True,
+            'commitments': all_commitments,
+            'total': len(all_commitments)
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get commitments: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+```
+
+## 3. Strategic Opportunity Scoring
+
+### Create New File: `intelligence/e_strategic_analysis/opportunity_scorer.py`
+
+```python
+"""
+Strategic Opportunity Scoring System
+===================================
+Scores and prioritizes opportunities based on multiple strategic factors.
+"""
+
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import json
+
+from utils.logging import structured_logger as logger
+from intelligence.a_core.claude_analysis import get_claude_client
+
+class OpportunityType(Enum):
+    PARTNERSHIP = "partnership"
+    INVESTMENT = "investment"
+    SALES = "sales"
+    HIRING = "hiring"
+    ACQUISITION = "acquisition"
+    STRATEGIC_ALLIANCE = "strategic_alliance"
+    MARKET_ENTRY = "market_entry"
+
+@dataclass
+class OpportunitySignal:
+    source: str  # "email", "news", "relationship_change", "market_event"
+    strength: float  # 0-1
+    description: str
+    timestamp: datetime
+    related_contacts: List[str]
+    evidence: Dict[str, Any]
+
+@dataclass
+class OpportunityScore:
+    opportunity_id: str
+    type: OpportunityType
+    title: str
+    score: float  # 0-100
+    factors: Dict[str, float]
+    reasoning: str
+    next_actions: List[str]
+    optimal_timing: datetime
+    success_probability: float
+    resource_requirements: Dict[str, Any]
+    related_contacts: List[str]
+    signals: List[OpportunitySignal]
+
+class OpportunityScorer:
+    """Score and prioritize strategic opportunities"""
+    
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.claude_client = get_claude_client()
+        
+        # Scoring weights
+        self.factor_weights = {
+            'timing_alignment': 0.25,
+            'relationship_strength': 0.20,
+            'competitive_advantage': 0.20,
+            'resource_fit': 0.15,
+            'success_probability': 0.20
+        }
+    
+    async def score_opportunity(self, 
+                              opportunity_data: Dict,
+                              signals: List[OpportunitySignal],
+                              knowledge_tree: Dict) -> OpportunityScore:
+        """Score a strategic opportunity"""
+        
+        # Extract opportunity details
+        opp_type = OpportunityType(opportunity_data.get('type', 'partnership'))
+        title = opportunity_data.get('title', 'Untitled Opportunity')
+        related_contacts = opportunity_data.get('contacts', [])
+        
+        # Calculate individual factors
+        factors = {
+            'timing_alignment': await self._assess_timing_alignment(signals, knowledge_tree),
+            'relationship_strength': await self._assess_relationship_strength(related_contacts, knowledge_tree),
+            'competitive_advantage': await self._assess_competitive_advantage(opportunity_data, knowledge_tree),
+            'resource_fit': await self._assess_resource_fit(opportunity_data),
+            'success_probability': await self._calculate_success_probability(signals, factors)
+        }
+        
+        # Calculate weighted score
+        total_score = sum(factors[key] * self.factor_weights[key] for key in factors)
+        
+        # Generate reasoning and next actions using Claude
+        reasoning, next_actions = await self._generate_strategic_reasoning(
+            opportunity_data, factors, signals, knowledge_tree
+        )
+        
+        # Calculate optimal timing
+        optimal_timing = await self._calculate_optimal_timing(signals, factors)
+        
+        # Estimate resource requirements
+        resources = await self._estimate_resources(opportunity_data, opp_type)
+        
+        return OpportunityScore(
+            opportunity_id=opportunity_data.get('id', f"opp_{datetime.utcnow().timestamp()}"),
+            type=opp_type,
+            title=title,
+            score=total_score * 100,  # Convert to 0-100 scale
+            factors=factors,
+            reasoning=reasoning,
+            next_actions=next_actions,
+            optimal_timing=optimal_timing,
+            success_probability=factors['success_probability'],
+            resource_requirements=resources,
+            related_contacts=related_contacts,
+            signals=signals
+        )
+    
+    async def _assess_timing_alignment(self, signals: List[OpportunitySignal], 
+                                     knowledge_tree: Dict) -> float:
+        """Assess how well opportunity timing aligns with market and internal factors"""
+        timing_score = 0.5  # Base score
+        
+        # Check for positive timing signals
+        recent_signals = [s for s in signals 
+                         if (datetime.utcnow() - s.timestamp).days < 30]
+        
+        if recent_signals:
+            # More recent signals = better timing
+            avg_recency = sum((30 - (datetime.utcnow() - s.timestamp).days) / 30 
+                            for s in recent_signals) / len(recent_signals)
+            timing_score += avg_recency * 0.3
+        
+        # Check market timing from knowledge tree
+        market_conditions = knowledge_tree.get('market_intelligence', {})
+        if market_conditions.get('market_momentum') == 'positive':
+            timing_score += 0.2
+        
+        return min(1.0, timing_score)
+    
+    async def _assess_relationship_strength(self, contacts: List[str], 
+                                          knowledge_tree: Dict) -> float:
+        """Assess strength of relationships involved in opportunity"""
+        if not contacts:
+            return 0.3  # Low score if no specific contacts
+        
+        relationships = knowledge_tree.get('relationships', {})
+        
+        # Calculate average relationship strength
+        total_strength = 0
+        for contact in contacts:
+            rel_data = relationships.get(contact, {})
+            
+            # Score based on relationship status
+            status_scores = {
+                'ESTABLISHED': 1.0,
+                'ONGOING': 0.8,
+                'ATTEMPTED': 0.3,
+                'COLD': 0.1,
+                'DORMANT': 0.2
+            }
+            
+            status = rel_data.get('status', 'COLD')
+            engagement = rel_data.get('engagement_level', 0.5)
+            
+            contact_strength = status_scores.get(status, 0.1) * 0.7 + engagement * 0.3
+            total_strength += contact_strength
+        
+        return total_strength / len(contacts) if contacts else 0.3
+    
+    async def _assess_competitive_advantage(self, opportunity_data: Dict, 
+                                          knowledge_tree: Dict) -> float:
+        """Assess competitive advantage for this opportunity"""
+        advantage_score = 0.5  # Base score
+        
+        # Check for unique advantages mentioned in opportunity
+        advantages = opportunity_data.get('advantages', [])
+        advantage_score += min(0.3, len(advantages) * 0.1)
+        
+        # Check strategic positioning from knowledge tree
+        strategic_intel = knowledge_tree.get('strategic_intelligence', {})
+        if strategic_intel.get('competitive_positioning', {}).get('strength') == 'strong':
+            advantage_score += 0.2
+        
+        return min(1.0, advantage_score)
+    
+    async def _assess_resource_fit(self, opportunity_data: Dict) -> float:
+        """Assess if resources align with opportunity requirements"""
+        # Simple implementation - would be more sophisticated in practice
+        required_resources = opportunity_data.get('resources_required', {})
+        
+        if not required_resources:
+            return 0.8  # Assume good fit if no specific requirements
+        
+        # Check time requirements
+        time_required = required_resources.get('time_commitment', 'low')
+        time_scores = {'low': 0.9, 'medium': 0.7, 'high': 0.5}
+        
+        # Check financial requirements
+        financial = required_resources.get('financial', 'low')
+        financial_scores = {'low': 0.9, 'medium': 0.6, 'high': 0.3}
+        
+        return (time_scores.get(time_required, 0.5) + 
+                financial_scores.get(financial, 0.5)) / 2
+    
+    async def _calculate_success_probability(self, signals: List[OpportunitySignal], 
+                                           factors: Dict[str, float]) -> float:
+        """Calculate probability of success based on signals and factors"""
+        # Base probability from other factors
+        base_probability = sum(factors.values()) / len(factors)
+        
+        # Adjust based on signal strength
+        if signals:
+            avg_signal_strength = sum(s.strength for s in signals) / len(signals)
+            base_probability = base_probability * 0.7 + avg_signal_strength * 0.3
+        
+        return min(0.95, base_probability)  # Cap at 95%
+    
+    async def _generate_strategic_reasoning(self, opportunity_data: Dict,
+                                          factors: Dict[str, float],
+                                          signals: List[OpportunitySignal],
+                                          knowledge_tree: Dict) -> Tuple[str, List[str]]:
+        """Use Claude to generate strategic reasoning and next actions"""
+        if not self.claude_client:
+            return "Strategic analysis unavailable", ["Review opportunity manually"]
+        
+        try:
+            # Prepare context for Claude
+            context = {
+                'opportunity': opportunity_data,
+                'scoring_factors': factors,
+                'signals': [{'source': s.source, 'strength': s.strength, 
+                           'description': s.description} for s in signals[:5]],
+                'key_relationships': self._extract_key_relationships(
+                    opportunity_data.get('contacts', []), knowledge_tree
+                )
+            }
+            
+            prompt = f"""
+Analyze this strategic opportunity and provide reasoning and next actions:
+
+OPPORTUNITY: {json.dumps(opportunity_data, indent=2)}
+
+SCORING FACTORS:
+{json.dumps(factors, indent=2)}
+
+SIGNALS:
+{json.dumps(context['signals'], indent=2)}
+
+KEY RELATIONSHIPS:
+{json.dumps(context['key_relationships'], indent=2)}
+
+Provide:
+1. A concise strategic reasoning (2-3 sentences) explaining why this opportunity scored {sum(factors.values()) * 20:.1f}/100
+2. List 3-5 specific, actionable next steps with clear ownership
+
+Format as JSON:
+{{
+    "reasoning": "Strategic reasoning here",
+    "next_actions": [
+        "Specific action 1",
+        "Specific action 2",
+        "Specific action 3"
+    ]
+}}
+"""
+
+            response = await asyncio.to_thread(
+                self.claude_client.messages.create,
+                model="claude-3-opus-20240229",
+                max_tokens=1000,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            result = self._parse_json_response(response.content[0].text)
+            if result:
+                return result['reasoning'], result['next_actions']
+                
+        except Exception as e:
+            logger.error(f"Claude strategic reasoning failed: {e}")
+        
+        # Fallback reasoning
+        return (
+            f"Opportunity scores {sum(factors.values()) * 20:.1f}/100 based on "
+            f"relationship strength and timing alignment.",
+            ["Schedule initial discussion", "Prepare proposal outline", "Identify key stakeholders"]
+        )
+    
+    async def _calculate_optimal_timing(self, signals: List[OpportunitySignal],
+                                      factors: Dict[str, float]) -> datetime:
+        """Calculate optimal timing for pursuing opportunity"""
+        # Start with base timing
+        base_date = datetime.utcnow()
+        
+        # Adjust based on urgency signals
+        urgent_signals = [s for s in signals if 'urgent' in s.description.lower() 
+                         or 'immediate' in s.description.lower()]
+        
+        if urgent_signals:
+            # Act within days
+            return base_date + timedelta(days=2)
+        elif factors['timing_alignment'] > 0.8:
+            # Good timing, act within a week
+            return base_date + timedelta(days=7)
+        elif factors['timing_alignment'] < 0.3:
+            # Poor timing, maybe wait
+            return base_date + timedelta(days=30)
+        else:
+            # Standard timing
+            return base_date + timedelta(days=14)
+    
+    async def _estimate_resources(self, opportunity_data: Dict, 
+                                opp_type: OpportunityType) -> Dict[str, Any]:
+        """Estimate resource requirements for opportunity"""
+        # Base requirements by type
+        base_requirements = {
+            OpportunityType.PARTNERSHIP: {
+                'time_hours_per_week': 5,
+                'duration_weeks': 12,
+                'team_members': 2,
+                'budget_range': '$10k-50k'
+            },
+            OpportunityType.INVESTMENT: {
+                'time_hours_per_week': 10,
+                'duration_weeks': 8,
+                'team_members': 3,
+                'budget_range': '$100k+'
+            },
+            OpportunityType.SALES: {
+                'time_hours_per_week': 3,
+                'duration_weeks': 6,
+                'team_members': 1,
+                'budget_range': '$5k-20k'
+            }
+        }
+        
+        requirements = base_requirements.get(opp_type, {
+            'time_hours_per_week': 5,
+            'duration_weeks': 8,
+            'team_members': 2,
+            'budget_range': 'TBD'
+        })
+        
+        # Adjust based on opportunity specifics
+        if opportunity_data.get('scope') == 'large':
+            requirements['time_hours_per_week'] *= 1.5
+            requirements['team_members'] = int(requirements['team_members'] * 1.5)
+        
+        return requirements
+    
+    def _extract_key_relationships(self, contacts: List[str], 
+                                 knowledge_tree: Dict) -> List[Dict]:
+        """Extract key relationship data for opportunity contacts"""
+        relationships = knowledge_tree.get('relationships', {})
+        key_rels = []
+        
+        for contact in contacts[:5]:  # Limit to top 5
+            rel_data = relationships.get(contact, {})
+            if rel_data:
+                key_rels.append({
+                    'contact': contact,
+                    'status': rel_data.get('status'),
+                    'engagement': rel_data.get('engagement_level', 0),
+                    'influence': rel_data.get('influence_level', 'unknown')
+                })
+        
+        return key_rels
+    
+    def _parse_json_response(self, response_text: str) -> Optional[Dict]:
+        """Parse JSON from Claude response"""
+        try:
+            import re
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+        except:
+            pass
+        return None
+    
+    async def find_opportunities_in_knowledge_tree(self, knowledge_tree: Dict) -> List[Dict]:
+        """Identify potential opportunities from knowledge tree patterns"""
+        opportunities = []
+        
+        # Look for partnership opportunities in relationships
+        for email, rel_data in knowledge_tree.get('relationships', {}).items():
+            if (rel_data.get('status') == 'ESTABLISHED' and 
+                rel_data.get('engagement_level', 0) > 0.7):
+                
+                # Check recent topics for opportunity indicators
+                topics = rel_data.get('topics_involved', [])
+                opp_keywords = ['partnership', 'collaboration', 'joint', 'together', 'opportunity']
+                
+                if any(keyword in topic.lower() for topic in topics for keyword in opp_keywords):
+                    opportunities.append({
+                        'id': f"opp_rel_{email}_{datetime.utcnow().timestamp()}",
+                        'type': 'partnership',
+                        'title': f"Partnership opportunity with {email}",
+                        'contacts': [email],
+                        'source': 'relationship_analysis',
+                        'confidence': rel_data.get('engagement_level', 0.5)
+                    })
+        
+        # Look for opportunities in topics
+        for topic_name, topic_data in knowledge_tree.get('topics', {}).items():
+            if topic_data.get('business_relevance') == 'high':
+                action_items = topic_data.get('action_items', [])
+                
+                # Check if action items suggest opportunities
+                for action in action_items:
+                    if any(word in action.lower() for word in ['explore', 'investigate', 'consider', 'evaluate']):
+                        opportunities.append({
+                            'id': f"opp_topic_{topic_name}_{datetime.utcnow().timestamp()}",
+                            'type': 'strategic_initiative',
+                            'title': f"Opportunity: {action}",
+                            'contacts': topic_data.get('participants', [])[:3],
+                            'source': 'topic_analysis',
+                            'topic': topic_name
+                        })
+        
+        return opportunities
+```
+
+### Integration Point 1: Add to `intelligence/e_strategic_analysis/strategic_analyzer.py`
+
+```python
+# Add import at top
+from .opportunity_scorer import OpportunityScorer, OpportunitySignal, OpportunityType
+
+# Add method to StrategicAnalysisSystem class:
+async def score_strategic_opportunities(self, knowledge_tree: Dict) -> List[Dict]:
+    """Score and prioritize all strategic opportunities"""
+    scorer = OpportunityScorer(self.user_id)
+    
+    # Find opportunities in knowledge tree
+    opportunities = await scorer.find_opportunities_in_knowledge_tree(knowledge_tree)
+    
+    # Score each opportunity
+    scored_opportunities = []
+    for opp in opportunities:
+        # Gather signals for this opportunity
+        signals = await self._gather_opportunity_signals(opp, knowledge_tree)
+        
+        # Score the opportunity
+        score = await scorer.score_opportunity(opp, signals, knowledge_tree)
+        
+        scored_opportunities.append({
+            'opportunity': opp,
+            'score': score.score,
+            'factors': score.factors,
+            'reasoning': score.reasoning,
+            'next_actions': score.next_actions,
+            'optimal_timing': score.optimal_timing.isoformat(),
+            'success_probability': score.success_probability,
+            'resources_required': score.resource_requirements
+        })
+    
+    # Sort by score
+    scored_opportunities.sort(key=lambda x: x['score'], reverse=True)
+    
+    return scored_opportunities
+
+async def _gather_opportunity_signals(self, opportunity: Dict, 
+                                    knowledge_tree: Dict) -> List[OpportunitySignal]:
+    """Gather signals related to an opportunity"""
+    signals = []
+    
+    # Check for email signals
+    related_emails = knowledge_tree.get('timeline', [])
+    for event in related_emails[-20:]:  # Recent events
+        if any(contact in event.get('participants', []) 
+               for contact in opportunity.get('contacts', [])):
+            signals.append(OpportunitySignal(
+                source='email',
+                strength=0.7,
+                description=event.get('event', ''),
+                timestamp=datetime.fromisoformat(event.get('date')),
+                related_contacts=event.get('participants', []),
+                evidence={'event_id': event.get('id')}
+            ))
+    
+    # Check for relationship changes
+    for contact in opportunity.get('contacts', []):
+        rel_data = knowledge_tree.get('relationships', {}).get(contact, {})
+        if rel_data.get('engagement_trend') == 'increasing':
+            signals.append(OpportunitySignal(
+                source='relationship_change',
+                strength=0.8,
+                description=f"Increasing engagement with {contact}",
+                timestamp=datetime.utcnow(),
+                related_contacts=[contact],
+                evidence={'engagement_level': rel_data.get('engagement_level')}
+            ))
+    
+    return signals
+```
+
+### Integration Point 2: Add to `api/routes.py`
+
+```python
+# Add endpoint for strategic opportunities
+@app.route('/api/intelligence/opportunities', methods=['GET'])
+@require_auth
+async def get_strategic_opportunities(user_id: int):
+    """Get scored strategic opportunities"""
+    try:
+        # Get knowledge tree
+        orchestrator = KnowledgeTreeOrchestrator(user_id)
+        knowledge_tree = await orchestrator.get_latest_knowledge_tree()
+        
+        if not knowledge_tree:
+            return jsonify({'success': False, 'error': 'No knowledge tree available'})
+        
+        # Score opportunities
+        analyzer = StrategicAnalysisSystem(user_id)
+        opportunities = await analyzer.score_strategic_opportunities(knowledge_tree)
+        
+        # Format for frontend
+        formatted_opps = []
+        for opp in opportunities[:20]:  # Top 20
+            formatted_opps.append({
+                'id': opp['opportunity']['id'],
+                'title': opp['opportunity']['title'],
+                'type': opp['opportunity']['type'],
+                'score': round(opp['score'], 1),
+                'success_probability': round(opp['success_probability'] * 100, 1),
+                'reasoning': opp['reasoning'],
+                'next_actions': opp['next_actions'],
+                'optimal_timing': opp['optimal_timing'],
+                'contacts': opp['opportunity'].get('contacts', []),
+                'resources': opp['resources_required'],
+                'factors': {k: round(v * 100, 1) for k, v in opp['factors'].items()}
+            })
+        
+        return jsonify({
+            'success': True,
+            'opportunities': formatted_opps,
+            'total': len(formatted_opps),
+            'generated_at': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get strategic opportunities: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+```
+
+## 4. Network Effect Visualization (Data Layer)
+
+### Create New File: `intelligence/e_strategic_analysis/network_effect_analyzer.py`
+
+```python
+"""
+Network Effect Analyzer
+======================
+Identifies hidden connections and optimal introduction paths.
+"""
+
+import asyncio
+from datetime import datetime
+from typing import Dict, List, Set, Tuple, Optional
+from dataclasses import dataclass
+from collections import defaultdict
+import networkx as nx
+
+from utils.logging import structured_logger as logger
+from models.database import get_db_manager
+
+@dataclass
+class NetworkPath:
+    start: str
+    end: str
+    path: List[str]
+    strength: float
+    connection_types: List[str]
+    introduction_strategy: str
+    success_probability: float
+
+@dataclass
+class HiddenConnection:
+    contact1: str
+    contact2: str
+    connection_type: str
+    evidence: List[str]
+    strength: float
+    discovery_date: datetime
+
+class NetworkEffectAnalyzer:
+    """Analyze network effects and find hidden connections"""
+    
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.network_graph = nx.Graph()
+        
+    async def build_network_graph(self, knowledge_tree: Dict) -> nx.Graph:
+        """Build network graph from knowledge tree"""
+        # Add nodes for all contacts
+        relationships = knowledge_tree.get('relationships', {})
+        for email, rel_data in relationships.items():
+            self.network_graph.add_node(
+                email,
+                status=rel_data.get('status'),
+                engagement=rel_data.get('engagement_level', 0),
+                influence=rel_data.get('influence_level', 'unknown')
+            )
+        
+        # Add edges based on co-occurrence in emails/topics
+        await self._add_email_edges(knowledge_tree)
+        await self._add_topic_edges(knowledge_tree)
+        await self._add_company_edges(relationships)
+        
+        return self.network_graph
+    
+    async def find_hidden_paths(self, target_contact: str, 
+                              knowledge_tree: Dict) -> List[NetworkPath]:
+        """Find hidden paths to reach a target contact"""
+        if not self.network_graph.nodes():
+            await self.build_network_graph(knowledge_tree)
+        
+        paths = []
+        user_email = await self._get_user_email()
+        
+        # Find all paths from user to target
+        try:
+            # Get top 5 shortest paths
+            all_paths = list(nx.shortest_simple_paths(
+                self.network_graph, user_email, target_contact
+            ))[:5]
+            
+            for path in all_paths:
+                if len(path) > 2:  # Indirect paths only
+                    network_path = await self._analyze_path(path, knowledge_tree)
+                    paths.append(network_path)
+                    
+        except nx.NetworkXNoPath:
+
+
+
+```python
+        # ... existing alert generation code
+        
+        # Filter through intelligent alert system
+        filtered_alerts = []
+        for alert_data in raw_alerts:
+            should_send, alert_status = await self.intelligent_alert_system.should_alert(alert_data)
+            
+            if should_send:
+                filtered_alerts.append(alert_data)
+            else:
+                # Log why alert was suppressed/scheduled
+                logger.info(f"Alert filtered: {alert_status} - {alert_data.get('title', 'Unknown')}")
+        
+        return filtered_alerts
+    
+    async def get_alert_digest(self) -> Dict:
+        """Get daily digest of suppressed alerts"""
+        return await self.intelligent_alert_system.generate_daily_digest()
+```
+
+### Integration Point 2: Add to `api/routes.py`
+
+```python
+# Add endpoints for alert management
+@app.route('/api/intelligence/alert-preferences', methods=['GET', 'PUT'])
+@require_auth
+async def manage_alert_preferences(user_id: int):
+    """Get or update alert preferences"""
+    if request.method == 'GET':
+        try:
+            db_manager = get_db_manager()
+            preferences = await db_manager.get_alert_preferences(user_id)
+            
+            if not preferences:
+                # Return defaults
+                preferences = {
+                    'quiet_hours_start': 22,
+                    'quiet_hours_end': 8,
+                    'weekend_alerts': False,
+                    'max_alerts_per_hour': 5,
+                    'max_alerts_per_day': 20,
+                    'digest_time': 9,
+                    'alert_channels': ['web', 'email']
+                }
+            
+            return jsonify({
+                'success': True,
+                'preferences': preferences
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to get alert preferences: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
+    else:  # PUT
+        try:
+            preferences = request.json
+            db_manager = get_db_manager()
+            
+            await db_manager.update_alert_preferences(user_id, preferences)
+            
+            return jsonify({
+                'success': True,
+                'message': 'Preferences updated'
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to update alert preferences: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/intelligence/alert-digest', methods=['GET'])
+@require_auth
+async def get_alert_digest(user_id: int):
+    """Get daily alert digest"""
+    try:
+        alert_system = TacticalAlertsSystem(user_id)
+        digest = await alert_system.get_alert_digest()
+        
+        if not digest:
+            return jsonify({
+                'success': True,
+                'message': 'No digest available',
+                'digest': None
+            })
+        
+        return jsonify({
+            'success': True,
+            'digest': digest
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get alert digest: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+```
+
+## 7. ROI Attribution Engine
+
+### Create New File: `intelligence/analytics/roi_attribution_engine.py`
+
+```python
+"""
+ROI Attribution Engine
+=====================
+Track which insights actually led to business outcomes.
+"""
+
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import json
+
+from utils.logging import structured_logger as logger
+from models.database import get_db_manager
+
+class OutcomeType(Enum):
+    DEAL_CLOSED = "deal_closed"
+    MEETING_SCHEDULED = "meeting_scheduled"
+    INTRODUCTION_MADE = "introduction_made"
+    PARTNERSHIP_FORMED = "partnership_formed"
+    INVESTMENT_RECEIVED = "investment_received"
+    HIRE_MADE = "hire_made"
+    CUSTOMER_ACQUIRED = "customer_acquired"
+
+class InsightType(Enum):
+    RELATIONSHIP_ALERT = "relationship_alert"
+    OPPORTUNITY_SCORE = "opportunity_score"
+    BEHAVIORAL_TIMING = "behavioral_timing"
+    NETWORK_PATH = "network_path"
+    STRATEGIC_RECOMMENDATION = "strategic_recommendation"
+    URGENCY_ALERT = "urgency_alert"
+
+@dataclass
+class BusinessOutcome:
+    outcome_id: str
+    type: OutcomeType
+    value: float  # Dollar value or importance score
+    date: datetime
+    description: str
+    related_contacts: List[str]
+    metadata: Dict[str, Any]
+
+@dataclass
+class InsightAction:
+    action_id: str
+    insight_type: InsightType
+    insight_details: Dict[str, Any]
+    action_taken: str
+    action_date: datetime
+    related_contacts: List[str]
+    confidence: float
+
+@dataclass
+class Attribution:
+    outcome: BusinessOutcome
+    contributing_insights: List[Tuple[InsightAction, float]]  # (insight, attribution_weight)
+    total_attribution_confidence: float
+    roi_multiplier: float
+    time_to_outcome: timedelta
+
+class ROIAttributionEngine:
+    """Track and attribute business outcomes to intelligence insights"""
+    
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.outcomes: List[BusinessOutcome] = []
+        self.actions: List[InsightAction] = []
+        self.attributions: List[Attribution] = []
+    
+    async def track_outcome(self, outcome_data: Dict) -> BusinessOutcome:
+        """Track a business outcome"""
+        outcome = BusinessOutcome(
+            outcome_id=f"outcome_{datetime.utcnow().timestamp()}",
+            type=OutcomeType(outcome_data['type']),
+            value=outcome_data.get('value', 0),
+            date=datetime.utcnow(),
+            description=outcome_data['description'],
+            related_contacts=outcome_data.get('contacts', []),
+            metadata=outcome_data.get('metadata', {})
+        )
+        
+        self.outcomes.append(outcome)
+        
+        # Store in database
+        await self._store_outcome(outcome)
+        
+        # Attempt attribution
+        attribution = await self.attribute_outcome(outcome)
+        if attribution:
+            await self._store_attribution(attribution)
+        
+        logger.info(f"Tracked outcome: {outcome.type.value} worth ${outcome.value:,.2f}")
+        
+        return outcome
+    
+    async def track_insight_action(self, action_data: Dict) -> InsightAction:
+        """Track when an insight leads to an action"""
+        action = InsightAction(
+            action_id=f"action_{datetime.utcnow().timestamp()}",
+            insight_type=InsightType(action_data['insight_type']),
+            insight_details=action_data.get('insight_details', {}),
+            action_taken=action_data['action'],
+            action_date=datetime.utcnow(),
+            related_contacts=action_data.get('contacts', []),
+            confidence=action_data.get('confidence', 0.5)
+        )
+        
+        self.actions.append(action)
+        
+        # Store in database
+        await self._store_action(action)
+        
+        logger.info(f"Tracked action: {action.action_taken} from {action.insight_type.value}")
+        
+        return action
+    
+    async def attribute_outcome(self, outcome: BusinessOutcome) -> Optional[Attribution]:
+        """Attribute an outcome to contributing insights"""
+        # Find relevant actions that preceded the outcome
+        relevant_actions = await self._find_relevant_actions(outcome)
+        
+        if not relevant_actions:
+            logger.info(f"No attributable actions found for outcome {outcome.outcome_id}")
+            return None
+        
+        # Calculate attribution weights
+        weighted_insights = await self._calculate_attribution_weights(
+            outcome, relevant_actions
+        )
+        
+        # Calculate ROI metrics
+        total_confidence = sum(weight for _, weight in weighted_insights)
+        
+        # Calculate time from first action to outcome
+        earliest_action = min(relevant_actions, key=lambda a: a.action_date)
+        time_to_outcome = outcome.date - earliest_action.action_date
+        
+        # Simple ROI calculation (would be more sophisticated in production)
+        roi_multiplier = outcome.value / max(len(relevant_actions) * 100, 1)  # Assume $100 cost per insight
+        
+        attribution = Attribution(
+            outcome=outcome,
+            contributing_insights=weighted_insights,
+            total_attribution_confidence=min(1.0, total_confidence),
+            roi_multiplier=roi_multiplier,
+            time_to_outcome=time_to_outcome
+        )
+        
+        self.attributions.append(attribution)
+        
+        return attribution
+    
+    async def _find_relevant_actions(self, outcome: BusinessOutcome) -> List[InsightAction]:
+        """Find actions that might have contributed to an outcome"""
+        relevant_actions = []
+        
+        # Look for actions in the 90 days before outcome
+        lookback_period = outcome.date - timedelta(days=90)
+        
+        for action in self.actions:
+            # Check time window
+            if action.action_date < lookback_period or action.action_date > outcome.date:
+                continue
+            
+            # Check contact overlap
+            contact_overlap = set(action.related_contacts) & set(outcome.related_contacts)
+            if contact_overlap:
+                relevant_actions.append(action)
+                continue
+            
+            # Check semantic relevance
+            if self._is_semantically_relevant(action, outcome):
+                relevant_actions.append(action)
+        
+        return relevant_actions
+    
+    async def _calculate_attribution_weights(self, 
+                                          outcome: BusinessOutcome,
+                                          actions: List[InsightAction]) -> List[Tuple[InsightAction, float]]:
+        """Calculate attribution weights for each contributing action"""
+        weighted_insights = []
+        
+        for action in actions:
+            weight = 0.0
+            
+            # Weight by time proximity (more recent = higher weight)
+            days_before = (outcome.date - action.action_date).days
+            time_weight = max(0, 1 - (days_before / 90))  # Linear decay over 90 days
+            weight += time_weight * 0.3
+            
+            # Weight by contact overlap
+            contact_overlap = len(set(action.related_contacts) & set(outcome.related_contacts))
+            total_contacts = len(set(action.related_contacts + outcome.related_contacts))
+            contact_weight = contact_overlap / max(total_contacts, 1)
+            weight += contact_weight * 0.4
+            
+            # Weight by insight type relevance
+            type_weight = self._get_type_relevance_weight(action.insight_type, outcome.type)
+            weight += type_weight * 0.3
+            
+            # Apply action confidence
+            weight *= action.confidence
+            
+            if weight > 0.1:  # Minimum threshold
+                weighted_insights.append((action, weight))
+        
+        # Normalize weights
+        total_weight = sum(w for _, w in weighted_insights)
+        if total_weight > 0:
+            weighted_insights = [(a, w/total_weight) for a, w in weighted_insights]
+        
+        return weighted_insights
+    
+    def _is_semantically_relevant(self, action: InsightAction, outcome: BusinessOutcome) -> bool:
+        """Check if action is semantically relevant to outcome"""
+        # Simple keyword matching (would use NLP in production)
+        action_text = json.dumps(action.insight_details).lower()
+        outcome_text = outcome.description.lower()
+        
+        relevant_keywords = {
+            OutcomeType.DEAL_CLOSED: ['deal', 'contract', 'agreement', 'sales'],
+            OutcomeType.PARTNERSHIP_FORMED: ['partner', 'collaboration', 'joint'],
+            OutcomeType.MEETING_SCHEDULED: ['meeting', 'call', 'discussion'],
+            OutcomeType.INVESTMENT_RECEIVED: ['invest', 'funding', 'capital']
+        }
+        
+        outcome_keywords = relevant_keywords.get(outcome.type, [])
+        
+        return any(keyword in action_text for keyword in outcome_keywords)
+    
+    def _get_type_relevance_weight(self, insight_type: InsightType, outcome_type: OutcomeType) -> float:
+        """Get relevance weight between insight type and outcome type"""
+        relevance_matrix = {
+            (InsightType.RELATIONSHIP_ALERT, OutcomeType.MEETING_SCHEDULED): 0.9,
+            (InsightType.OPPORTUNITY_SCORE, OutcomeType.DEAL_CLOSED): 0.9,
+            (InsightType.BEHAVIORAL_TIMING, OutcomeType.MEETING_SCHEDULED): 0.8,
+            (InsightType.NETWORK_PATH, OutcomeType.INTRODUCTION_MADE): 0.9,
+            (InsightType.STRATEGIC_RECOMMENDATION, OutcomeType.PARTNERSHIP_FORMED): 0.8,
+            (InsightType.URGENCY_ALERT, OutcomeType.DEAL_CLOSED): 0.7,
+        }
+        
+        return relevance_matrix.get((insight_type, outcome_type), 0.3)
+    
+    async def generate_roi_report(self, time_period_days: int = 90) -> Dict:
+        """Generate ROI report for intelligence system"""
+        cutoff_date = datetime.utcnow() - timedelta(days=time_period_days)
+        
+        # Load recent data from database
+        await self._load_recent_data(cutoff_date)
+        
+        # Calculate metrics
+        total_outcomes_value = sum(o.value for o in self.outcomes if o.date > cutoff_date)
+        attributed_value = sum(
+            attr.outcome.value * attr.total_attribution_confidence
+            for attr in self.attributions
+            if attr.outcome.date > cutoff_date
+        )
+        
+        # Group by insight type
+        insight_performance = {}
+        for attr in self.attributions:
+            if attr.outcome.date > cutoff_date:
+                for action, weight in attr.contributing_insights:
+                    insight_type = action.insight_type.value
+                    if insight_type not in insight_performance:
+                        insight_performance[insight_type] = {
+                            'total_value': 0,
+                            'count': 0,
+                            'avg_time_to_outcome': timedelta(),
+                            'avg_confidence': 0
+                        }
+                    
+                    perf = insight_performance[insight_type]
+                    perf['total_value'] += attr.outcome.value * weight
+                    perf['count'] += 1
+                    perf['avg_time_to_outcome'] += attr.time_to_outcome
+                    perf['avg_confidence'] += action.confidence
+        
+        # Calculate averages
+        for perf in insight_performance.values():
+            if perf['count'] > 0:
+                perf['avg_time_to_outcome'] = perf['avg_time_to_outcome'] / perf['count']
+                perf['avg_confidence'] = perf['avg_confidence'] / perf['count']
+        
+        # Top performing insights
+        top_insights = []
+        for attr in sorted(self.attributions, 
+                         key=lambda a: a.outcome.value * a.total_attribution_confidence,
+                         reverse=True)[:10]:
+            if attr.outcome.date > cutoff_date:
+                top_insights.append({
+                    'outcome': attr.outcome.description,
+                    'value': attr.outcome.value,
+                    'confidence': attr.total_attribution_confidence,
+                    'roi_multiplier': attr.roi_multiplier,
+                    'contributing_insights': [
+                        {
+                            'type': action.insight_type.value,
+                            'action': action.action_taken,
+                            'weight': weight
+                        }
+                        for action, weight in attr.contributing_insights[:3]
+                    ]
+                })
+        
+        report = {
+            'time_period_days': time_period_days,
+            'total_outcomes_value': total_outcomes_value,
+            'attributed_value': attributed_value,
+            'attribution_rate': attributed_value / max(total_outcomes_value, 1),
+            'total_outcomes': len([o for o in self.outcomes if o.date > cutoff_date]),
+            'total_attributed_outcomes': len([a for a in self.attributions if a.outcome.date > cutoff_date]),
+            'insight_performance': insight_performance,
+            'top_insights': top_insights,
+            'avg_time_to_outcome': sum(
+                (a.time_to_outcome for a in self.attributions if a.outcome.date > cutoff_date),
+                timedelta()
+            ) / max(len(self.attributions), 1),
+            'report_generated': datetime.utcnow().isoformat()
+        }
+        
+        return report
+    
+    async def get_insight_recommendations(self) -> List[Dict]:
+        """Get recommendations for which insights to focus on based on ROI"""
+        # Analyze historical performance
+        insight_stats = {}
+        
+        for attr in self.attributions:
+            for action, weight in attr.contributing_insights:
+                insight_type = action.insight_type.value
+                if insight_type not in insight_stats:
+                    insight_stats[insight_type] = {
+                        'total_value': 0,
+                        'count': 0,
+                        'success_rate': 0,
+                        'avg_roi': 0
+                    }
+                
+                stats = insight_stats[insight_type]
+                stats['total_value'] += attr.outcome.value * weight
+                stats['count'] += 1
+                stats['avg_roi'] = stats['total_value'] / max(stats['count'] * 100, 1)  # Assume $100 cost
+        
+        # Generate recommendations
+        recommendations = []
+        
+        for insight_type, stats in insight_stats.items():
+            if stats['avg_roi'] > 10:  # High ROI insights
+                recommendations.append({
+                    'insight_type': insight_type,
+                    'recommendation': f"Focus on {insight_type} - averaging {stats['avg_roi']:.1f}x ROI",
+                    'priority': 'high',
+                    'expected_value': stats['total_value'] / max(stats['count'], 1),
+                    'confidence': min(1.0, stats['count'] / 10)  # More data = higher confidence
+                })
+            elif stats['avg_roi'] < 2:  # Low ROI insights
+                recommendations.append({
+                    'insight_type': insight_type,
+                    'recommendation': f"De-prioritize {insight_type} - only {stats['avg_roi']:.1f}x ROI",
+                    'priority': 'low',
+                    'expected_value': stats['total_value'] / max(stats['count'], 1),
+                    'confidence': min(1.0, stats['count'] / 10)
+                })
+        
+        # Sort by expected value
+        recommendations.sort(key=lambda r: r['expected_value'], reverse=True)
+        
+        return recommendations
+    
+    async def _store_outcome(self, outcome: BusinessOutcome):
+        """Store outcome in database"""
+        db_manager = get_db_manager()
+        await db_manager.store_business_outcome(self.user_id, outcome)
+    
+    async def _store_action(self, action: InsightAction):
+        """Store insight action in database"""
+        db_manager = get_db_manager()
+        await db_manager.store_insight_action(self.user_id, action)
+    
+    async def _store_attribution(self, attribution: Attribution):
+        """Store attribution in database"""
+        db_manager = get_db_manager()
+        await db_manager.store_attribution(self.user_id, attribution)
+    
+    async def _load_recent_data(self, cutoff_date: datetime):
+        """Load recent data from database"""
+        db_manager = get_db_manager()
+        
+        # Load outcomes
+        outcomes_data = await db_manager.get_business_outcomes(self.user_id, cutoff_date)
+        self.outcomes = [self._deserialize_outcome(o) for o in outcomes_data]
+        
+        # Load actions
+        actions_data = await db_manager.get_insight_actions(self.user_id, cutoff_date)
+        self.actions = [self._deserialize_action(a) for a in actions_data]
+        
+        # Load attributions
+        attributions_data = await db_manager.get_attributions(self.user_id, cutoff_date)
+        self.attributions = [self._deserialize_attribution(a) for a in attributions_data]
+    
+    def _deserialize_outcome(self, data: Dict) -> BusinessOutcome:
+        """Deserialize outcome from database"""
+        return BusinessOutcome(
+            outcome_id=data['outcome_id'],
+            type=OutcomeType(data['type']),
+            value=data['value'],
+            date=datetime.fromisoformat(data['date']),
+            description=data['description'],
+            related_contacts=data['related_contacts'],
+            metadata=data.get('metadata', {})
+        )
+    
+    def _deserialize_action(self, data: Dict) -> InsightAction:
+        """Deserialize action from database"""
+        return InsightAction(
+            action_id=data['action_id'],
+            insight_type=InsightType(data['insight_type']),
+            insight_details=data['insight_details'],
+            action_taken=data['action_taken'],
+            action_date=datetime.fromisoformat(data['action_date']),
+            related_contacts=data['related_contacts'],
+            confidence=data['confidence']
+        )
+    
+    def _deserialize_attribution(self, data: Dict) -> Attribution:
+        """Deserialize attribution from database"""
+        # This would reconstruct the full attribution object
+        # Simplified for brevity
+        return None  # Implementation would reconstruct from stored data
+```
+
+### Integration Point 1: Add to `api/routes.py`
+
+```python
+# Import at top
+from intelligence.analytics.roi_attribution_engine import ROIAttributionEngine, OutcomeType, InsightType
+
+# Add endpoints for ROI tracking
+@app.route('/api/intelligence/track-outcome', methods=['POST'])
+@require_auth
+async def track_business_outcome(user_id: int):
+    """Track a business outcome for ROI attribution"""
+    try:
+        outcome_data = request.json
+        
+        # Validate required fields
+        required_fields = ['type', 'description']
+        if not all(field in outcome_data for field in required_fields):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+        
+        # Initialize ROI engine
+        roi_engine = ROIAttributionEngine(user_id)
+        
+        # Track outcome
+        outcome = await roi_engine.track_outcome(outcome_data)
+        
+        return jsonify({
+            'success': True,
+            'outcome_id': outcome.outcome_id,
+            'message': 'Outcome tracked successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to track outcome: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/intelligence/track-action', methods=['POST'])
+@require_auth
+async def track_insight_action(user_id: int):
+    """Track when an insight leads to an action"""
+    try:
+        action_data = request.json
+        
+        # Initialize ROI engine
+        roi_engine = ROIAttributionEngine(user_id)
+        
+        # Track action
+        action = await roi_engine.track_insight_action(action_data)
+        
+        return jsonify({
+            'success': True,
+            'action_id': action.action_id,
+            'message': 'Action tracked successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to track action: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/intelligence/roi-report', methods=['GET'])
+@require_auth
+async def get_roi_report(user_id: int):
+    """Get ROI attribution report"""
+    try:
+        # Get time period from query params
+        time_period = int(request.args.get('days', 90))
+        
+        # Initialize ROI engine
+        roi_engine = ROIAttributionEngine(user_id)
+        
+        # Generate report
+        report = await roi_engine.generate_roi_report(time_period)
+        
+        return jsonify({
+            'success': True,
+            'report': report
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to generate ROI report: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/intelligence/insight-recommendations', methods=['GET'])
+@require_auth
+async def get_insight_recommendations(user_id: int):
+    """Get recommendations for which insights to focus on"""
+    try:
+        # Initialize ROI engine
+        roi_engine = ROIAttributionEngine(user_id)
+        
+        # Get recommendations
+        recommendations = await roi_engine.get_insight_recommendations()
+        
+        return jsonify({
+            'success': True,
+            'recommendations': recommendations
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get recommendations: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+```
+
+### Integration Point 2: Add tracking to existing endpoints
+
+In `api/routes.py`, modify existing endpoints to track actions:
+
+```python
+# Example: Modify the send_email endpoint to track behavioral timing usage
+@app.route('/api/send-email', methods=['POST'])
+@require_auth
+async def send_email(user_id: int):
+    """Send email with tracking"""
+    try:
+        # ... existing email sending code ...
+        
+        # If behavioral timing was used, track it
+        if email_data.get('used_behavioral_timing'):
+            roi_engine = ROIAttributionEngine(user_id)
+            await roi_engine.track_insight_action({
+                'insight_type': 'behavioral_timing',
+                'insight_details': {
+                    'optimal_time': email_data.get('send_time'),
+                    'recipient': email_data.get('recipient')
+                },
+                'action': f"Sent email to {email_data.get('recipient')} using behavioral timing",
+                'contacts': [email_data.get('recipient')],
+                'confidence': 0.8
+            })
+        
+        # ... rest of endpoint ...
+```
+
+## Summary
+
+This implementation guide provides a comprehensive blueprint for adding all the recommended enhancements to your intelligence system. Each component is:
+
+1. **Modular** - Can be implemented independently
+2. **Integrated** - Connects with existing systems through clear integration points
+3. **Scalable** - Designed to handle growing data and users
+4. **Testable** - Each component can be tested in isolation
+
+The key implementation order I'd recommend:
+
+1. **Start with Relationship Decay Predictor** - Immediate value, relatively simple
+2. **Add Conversational Memory** - Enhances all communications
+3. **Implement Opportunity Scoring** - Strategic value for business decisions
+4. **Add Communication Optimizer** - Improve engagement rates
+5. **Deploy Intelligent Alert System** - Prevent user fatigue
+6. **Build Network Analyzer** - Unlock hidden connections
+7. **Finally, add ROI Attribution** - Measure and optimize everything
+
+Each component adds significant value while building on the previous ones, creating a truly intelligent system that learns and improves over time.

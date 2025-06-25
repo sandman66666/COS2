@@ -1361,6 +1361,52 @@ body {
     font-weight: 900;
 }
 
+/* Fix SVG inheritance issues to prevent console errors */
+svg {
+    height: auto !important;
+    width: auto !important;
+}
+
+svg[height="inherit"] {
+    height: 1em !important;
+}
+
+svg[width="inherit"] {
+    width: 1em !important;
+}
+
+/* Ensure FontAwesome SVG icons render properly */
+.fas svg, .fab svg, .far svg, .fal svg {
+    height: 1em !important;
+    width: 1em !important;
+    vertical-align: -0.125em;
+}
+
+/* More comprehensive SVG attribute fixes */
+svg[height="inherit"],
+svg[width="inherit"],
+svg[viewBox="inherit"],
+svg[x="inherit"],
+svg[y="inherit"] {
+    height: 1em !important;
+    width: 1em !important;
+}
+
+/* Fix for third-party SVG elements (like Guidde) */
+*[data-guidde] svg,
+.guidde svg,
+div[class*="guidde"] svg {
+    height: auto !important;
+    width: auto !important;
+}
+
+/* Additional SVG inheritance fixes */
+svg[style*="height: inherit"],
+svg[style*="width: inherit"] {
+    height: 1em !important;
+    width: 1em !important;
+}
+
 /* Fix for tab content spacing */
 .tab-content h4 {
     border-bottom: 2px solid #e9ecef;

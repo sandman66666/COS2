@@ -8,11 +8,12 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any
 from dataclasses import dataclass
+import re
 
 import anthropic
-from .content_summarizer import ContentSummary, ContactSummary
-from .communication_intelligence import CommunicationProfile
-from .data_organizer import OrganizedContent
+from intelligence.c_content_processing.content_summarizer import ContentSummary, ContactSummary
+from intelligence.b_data_collection.communication_intelligence import CommunicationProfile
+from intelligence.b_data_collection.data_organizer import OrganizedContent
 
 @dataclass
 class StrategicInsight:
@@ -75,6 +76,51 @@ class StrategicAnalysisSystem:
             "total_insights": sum(len(insights) for insights in agent_insights.values())
         }
 
+    async def analyze_strategic_intelligence_from_tree(self, user_id: int, 
+                                                     knowledge_tree,
+                                                     tree_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Strategic Analysis working directly with Claude knowledge tree
+        """
+        print("🧠 Starting Phase 2: Strategic Intelligence Analysis from Claude Tree...")
+        
+        # Run all agents in parallel using tree context
+        print("🚀 Running strategic agents in parallel on Claude tree...")
+        
+        results = await asyncio.gather(
+            self._business_development_analysis(tree_context),
+            self._competitive_intelligence_analysis(tree_context),
+            self._network_analysis(tree_context),
+            self._opportunity_matrix_analysis(tree_context),
+            return_exceptions=False  # Let failures propagate for retry
+        )
+        
+        agent_insights = {
+            "business_development": results[0],
+            "competitive_intelligence": results[1], 
+            "network_analysis": results[2],
+            "opportunity_matrix": results[3]
+        }
+        
+        print("✅ All strategic agents completed")
+        
+        # Synthesize results
+        synthesis = await self._cross_domain_synthesis(agent_insights, tree_context)
+        
+        return {
+            "analysis_timestamp": datetime.now().isoformat(),
+            "user_id": user_id,
+            "agent_insights": agent_insights,
+            "cross_domain_synthesis": synthesis,
+            "total_insights": sum(len(insights) for insights in agent_insights.values()),
+            "tree_metadata": {
+                "topics_analyzed": len(tree_context.get('all_topics', [])),
+                "contacts_analyzed": len(tree_context.get('all_contacts', [])),
+                "business_domains": list(tree_context.get('business_domains', {}).keys()),
+                "engagement_rate": tree_context.get('engagement_rate', 0)
+            }
+        }
+
     def _prepare_analysis_context(self, topic_summaries, contact_summaries, 
                                 communication_profiles, organized_content) -> Dict[str, Any]:
         """Prepare clean context for strategic agents"""
@@ -109,6 +155,42 @@ class StrategicAnalysisSystem:
                           if profile.relationship_status.value in ["established", "ongoing"])
         return engaged_count / len(communication_profiles)
 
+    def _extract_json_from_response(self, response: str) -> List[Dict]:
+        """Extract JSON from Claude response, handling markdown formatting"""
+        
+        # Try direct JSON parsing first
+        try:
+            return json.loads(response.strip())
+        except json.JSONDecodeError:
+            pass
+        
+        # Try to extract JSON from markdown code blocks
+        json_patterns = [
+            r'```json\s*(\[.*?\])\s*```',
+            r'```\s*(\[.*?\])\s*```',
+            r'(\[.*?\])',
+        ]
+        
+        for pattern in json_patterns:
+            matches = re.findall(pattern, response, re.DOTALL)
+            for match in matches:
+                try:
+                    return json.loads(match.strip())
+                except json.JSONDecodeError:
+                    continue
+        
+        # If no JSON array found, create a single insight from the text
+        print(f"⚠️ Could not parse JSON, creating fallback insight from text")
+        return [{
+            "title": "Strategic Analysis",
+            "description": response[:500] + "..." if len(response) > 500 else response,
+            "strategic_value": "Requires further analysis",
+            "next_actions": ["Review and refine analysis"],
+            "confidence_score": 0.3,
+            "time_sensitivity": "medium",
+            "business_impact": "To be determined"
+        }]
+
     async def _business_development_analysis(self, context: Dict[str, Any]) -> List[StrategicInsight]:
         """Business Development Agent Analysis"""
         
@@ -140,12 +222,23 @@ class StrategicAnalysisSystem:
         - Time sensitivity
         - Business impact
 
-        Format as JSON array.
+        IMPORTANT: Return ONLY a JSON array in this exact format:
+        [
+          {{
+            "title": "Opportunity Title",
+            "description": "Detailed description",
+            "strategic_value": "Clear value proposition",
+            "next_actions": ["Action 1", "Action 2"],
+            "confidence_score": 0.8,
+            "time_sensitivity": "high",
+            "business_impact": "Impact description"
+          }}
+        ]
         """
         
         try:
             response = await self._call_claude_with_retry(prompt)
-            insights_data = json.loads(response)
+            insights_data = self._extract_json_from_response(response)
             
             insights = []
             for item in insights_data:
@@ -161,6 +254,7 @@ class StrategicAnalysisSystem:
                 )
                 insights.append(insight)
             
+            print(f"✅ Business Development: {len(insights)} insights generated")
             return insights
             
         except Exception as e:
@@ -191,12 +285,23 @@ class StrategicAnalysisSystem:
 
         Focus on actionable competitive intelligence based on relationship and topic data.
 
-        Format as JSON array with title, description, strategic_value, next_actions, confidence_score, time_sensitivity, business_impact.
+        IMPORTANT: Return ONLY a JSON array in this exact format:
+        [
+          {{
+            "title": "Insight Title",
+            "description": "Detailed analysis",
+            "strategic_value": "Competitive advantage",
+            "next_actions": ["Action 1", "Action 2"],
+            "confidence_score": 0.7,
+            "time_sensitivity": "medium",
+            "business_impact": "Market positioning impact"
+          }}
+        ]
         """
         
         try:
             response = await self._call_claude_with_retry(prompt)
-            insights_data = json.loads(response)
+            insights_data = self._extract_json_from_response(response)
             
             insights = []
             for item in insights_data:
@@ -212,6 +317,7 @@ class StrategicAnalysisSystem:
                 )
                 insights.append(insight)
             
+            print(f"✅ Competitive Intelligence: {len(insights)} insights generated")
             return insights
             
         except Exception as e:
@@ -245,12 +351,23 @@ class StrategicAnalysisSystem:
 
         Focus on maximizing network value and relationship ROI.
 
-        Format as JSON array with title, description, strategic_value, next_actions, confidence_score, time_sensitivity, business_impact.
+        IMPORTANT: Return ONLY a JSON array in this exact format:
+        [
+          {{
+            "title": "Network Strategy",
+            "description": "Network optimization approach",
+            "strategic_value": "Relationship value",
+            "next_actions": ["Action 1", "Action 2"],
+            "confidence_score": 0.8,
+            "time_sensitivity": "high",
+            "business_impact": "Network growth impact"
+          }}
+        ]
         """
         
         try:
             response = await self._call_claude_with_retry(prompt)
-            insights_data = json.loads(response)
+            insights_data = self._extract_json_from_response(response)
             
             insights = []
             for item in insights_data:
@@ -266,6 +383,7 @@ class StrategicAnalysisSystem:
                 )
                 insights.append(insight)
             
+            print(f"✅ Network Analysis: {len(insights)} insights generated")
             return insights
             
         except Exception as e:
@@ -299,12 +417,23 @@ class StrategicAnalysisSystem:
 
         Prioritize by impact, feasibility, and timing.
 
-        Format as JSON array with title, description, strategic_value, next_actions, confidence_score, time_sensitivity, business_impact.
+        IMPORTANT: Return ONLY a JSON array in this exact format:
+        [
+          {{
+            "title": "Opportunity Title",
+            "description": "Strategic opportunity description",
+            "strategic_value": "Value proposition",
+            "next_actions": ["Action 1", "Action 2"],
+            "confidence_score": 0.9,
+            "time_sensitivity": "high",
+            "business_impact": "Expected business impact"
+          }}
+        ]
         """
         
         try:
             response = await self._call_claude_with_retry(prompt)
-            insights_data = json.loads(response)
+            insights_data = self._extract_json_from_response(response)
             
             insights = []
             for item in insights_data:
@@ -320,6 +449,7 @@ class StrategicAnalysisSystem:
                 )
                 insights.append(insight)
             
+            print(f"✅ Opportunity Matrix: {len(insights)} insights generated")
             return insights
             
         except Exception as e:
@@ -335,6 +465,7 @@ class StrategicAnalysisSystem:
             all_insights.extend(insights)
         
         if not all_insights:
+            print("⚠️ No insights to synthesize")
             return []
         
         insights_summary = "\n".join([
@@ -354,12 +485,23 @@ class StrategicAnalysisSystem:
         3. Optimize timing and resource allocation
         4. Maximize strategic impact
 
-        Format as JSON array with title, description, strategic_value, next_actions, confidence_score, time_sensitivity, business_impact.
+        IMPORTANT: Return ONLY a JSON array in this exact format:
+        [
+          {{
+            "title": "Cross-Domain Opportunity",
+            "description": "Integrated strategic recommendation",
+            "strategic_value": "Synergistic value creation",
+            "next_actions": ["Action 1", "Action 2"],
+            "confidence_score": 0.8,
+            "time_sensitivity": "high",
+            "business_impact": "Multiplicative impact across domains"
+          }}
+        ]
         """
         
         try:
             response = await self._call_claude_with_retry(prompt)
-            synthesis_data = json.loads(response)
+            synthesis_data = self._extract_json_from_response(response)
             
             synthesis_insights = []
             for item in synthesis_data:
@@ -375,39 +517,72 @@ class StrategicAnalysisSystem:
                 )
                 synthesis_insights.append(insight)
             
+            print(f"✅ Cross-Domain Synthesis: {len(synthesis_insights)} insights generated")
             return synthesis_insights
             
         except Exception as e:
             print(f"❌ Cross-domain synthesis failed: {e}")
             return []
 
-    def _format_contacts_for_analysis(self, contacts: List[ContactSummary]) -> str:
+    def _format_contacts_for_analysis(self, contacts: List) -> str:
         """Format contact summaries for agent analysis"""
         if not contacts:
             return "No contacts in this category"
         
         formatted = []
         for contact in contacts:
+            # Handle both dict and object formats
+            if isinstance(contact, dict):
+                email = contact.get('email', 'unknown@unknown.com')
+                name = contact.get('name', email.split('@')[0])
+                company = contact.get('company', 'Unknown')
+                role = contact.get('role', 'contact')
+                relationship_status = contact.get('relationship_status', 'unknown')
+                topics_involved = contact.get('topics_involved', [])
+            else:
+                # Original object format
+                email = contact.email
+                name = contact.name
+                company = contact.company
+                role = contact.role
+                relationship_status = contact.relationship_status
+                topics_involved = contact.topics_involved
+            
             formatted.append(
-                f"• {contact.name or contact.email} ({contact.company or 'Unknown'}) - "
-                f"{contact.role} - {contact.relationship_status} - "
-                f"Topics: {', '.join(contact.topics_involved[:3])}"
+                f"• {name or email} ({company or 'Unknown'}) - "
+                f"{role} - {relationship_status} - "
+                f"Topics: {', '.join(topics_involved[:3])}"
             )
         
         return "\n".join(formatted)
 
-    def _format_topics_for_analysis(self, topics: List[ContentSummary]) -> str:
+    def _format_topics_for_analysis(self, topics: List) -> str:
         """Format topic summaries for agent analysis"""
         if not topics:
             return "No topics in this category"
         
         formatted = []
         for topic in topics:
+            # Handle both dict and object formats
+            if isinstance(topic, dict):
+                topic_name = topic.get('topic_name', 'Unknown Topic')
+                priority_level = topic.get('priority_level', 'medium')
+                business_context = topic.get('business_context', 'No context')
+                participants = topic.get('participants', [])
+                action_items = topic.get('action_items', [])
+            else:
+                # Original object format
+                topic_name = topic.topic_name
+                priority_level = topic.priority_level
+                business_context = topic.business_context
+                participants = topic.participants
+                action_items = topic.action_items
+            
             formatted.append(
-                f"• {topic.topic_name} ({topic.priority_level}) - "
-                f"{topic.business_context} - "
-                f"Participants: {len(topic.participants)} - "
-                f"Actions: {len(topic.action_items)}"
+                f"• {topic_name} ({priority_level}) - "
+                f"{business_context} - "
+                f"Participants: {len(participants)} - "
+                f"Actions: {len(action_items)}"
             )
         
         return "\n".join(formatted)
@@ -419,9 +594,11 @@ class StrategicAnalysisSystem:
         while True:
             try:
                 attempt += 1
+                print(f"🔍 Claude API call attempt {attempt}")
                 
-                response = self.claude_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                response = await asyncio.to_thread(
+                    self.claude_client.messages.create,
+                    model="claude-3-5-sonnet-20241022",  # Use correct Claude model name
                     max_tokens=4000,
                     temperature=0.1,
                     messages=[{
@@ -430,19 +607,54 @@ class StrategicAnalysisSystem:
                     }]
                 )
                 
-                return response.content[0].text
+                response_text = response.content[0].text
+                print(f"✅ Claude response received: {len(response_text)} chars")
+                print(f"🔍 Response preview: {response_text[:200]}...")
+                
+                return response_text
                 
             except Exception as e:
-                if "overloaded" in str(e).lower() or "529" in str(e):
+                error_msg = str(e)
+                print(f"❌ Claude API error (attempt {attempt}): {error_msg}")
+                
+                if "overloaded" in error_msg.lower() or "529" in error_msg:
                     # Exponential backoff for server overload
                     wait_time = min(300, (2 ** attempt) + (attempt * 0.5))
-                    print(f"⏳ Claude overloaded, retrying in {wait_time:.1f}s (attempt {attempt})")
+                    print(f"⏳ Claude overloaded, retrying in {wait_time:.1f}s")
                     await asyncio.sleep(wait_time)
                     continue
+                elif "model" in error_msg.lower() and "not found" in error_msg.lower():
+                    print(f"❌ Model error: {error_msg}")
+                    print("🔧 Trying fallback model...")
+                    # Try different model names
+                    fallback_models = [
+                        "claude-3-5-sonnet-20241022",
+                        "claude-3-sonnet-20240229", 
+                        "claude-3-haiku-20240307"
+                    ]
+                    for model in fallback_models:
+                        try:
+                            response = await asyncio.to_thread(
+                                self.claude_client.messages.create,
+                                model=model,
+                                max_tokens=4000,
+                                temperature=0.1,
+                                messages=[{
+                                    "role": "user",
+                                    "content": prompt
+                                }]
+                            )
+                            response_text = response.content[0].text
+                            print(f"✅ Fallback model {model} worked!")
+                            return response_text
+                        except:
+                            continue
+                    # If all models fail, raise the original error
+                    raise
                 else:
-                    print(f"❌ Claude API error: {e}")
                     if attempt < 5:  # Try 5 times for other errors
                         await asyncio.sleep(5)
                         continue
                     else:
+                        print(f"❌ Max retries reached. Last error: {error_msg}")
                         raise 

@@ -1353,7 +1353,7 @@ async def build_advanced_knowledge_tree():
                     'total_content_processed': result.get('processing_stats', {}).get('total_content_processed', 0),
                     'claude_batches_used': result.get('processing_stats', {}).get('total_batches', 0),
                     'chars_per_batch': result.get('claude_metadata', {}).get('max_chars_per_batch', 180000),
-                    'model_used': result.get('claude_metadata', {}).get('model_used', 'claude-3-5-sonnet')
+                    'model_used': result.get('claude_metadata', {}).get('model_used', 'claude-opus-4-20250514')
                 },
                 'intelligence_extracted': {
                     'topics_identified': result.get('processing_stats', {}).get('topics_identified', 0),

@@ -54,8 +54,8 @@ class BaseAnalyst(ABC):
         
         self.client = anthropic.Anthropic(api_key=api_key)
         
-        # Use environment variable for model, with fallback to claude-3-opus
-        self.model = model or os.getenv('CLAUDE_MODEL', 'claude-3-opus-20240229')
+        # Use environment variable for model, with fallback to claude-4-opus
+        self.model = model or os.getenv('CLAUDE_MODEL', 'claude-opus-4-20250514')
         
         self.storage_manager = None
         

@@ -1,26 +1,45 @@
 """
-Knowledge Tree Orchestrator
-Main orchestrator now using Claude Content Consolidation for any content type (emails, documents, slack, tasks, etc.)
+Knowledge Tree Orchestrator - Two-Phase Architecture
+====================================================
+Phase 1: Claude Content Consolidation & Tree Structure Building (Comprehensive, Intelligent)
+Phase 2: Strategic Intelligence Analysis (Expensive, High-Quality, Targeted)
+
+Implements the complete two-phase architecture as specified in flow.txt
 """
 
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+import json
+from dataclasses import asdict
+import anthropic
 
-from intelligence.c_content_processing.claude_content_consolidator import ClaudeContentConsolidator, ContentItem
+from intelligence.c_content_processing.claude_content_consolidator import ClaudeContentConsolidator, ContentItem, ContentType
+from intelligence.e_strategic_analysis.strategic_analyzer import StrategicAnalysisSystem, StrategicInsight
 from storage.storage_manager import StorageManager
 
 class KnowledgeTreeOrchestrator:
     def __init__(self, claude_api_key: str):
+        # Phase 1: Claude Content Consolidation (builds comprehensive tree structure)
         self.claude_consolidator = ClaudeContentConsolidator(claude_api_key)
+        
+        # Phase 2: Strategic Intelligence Analysis (works on organized tree)
+        self.strategic_analyzer = StrategicAnalysisSystem(claude_api_key)
+        
         self.storage_manager = StorageManager()
 
     async def build_complete_knowledge_tree(self, user_email: str, 
-                                          force_rebuild: bool = False) -> Dict[str, Any]:
+                                          force_rebuild: bool = False,
+                                          force_phase1_rebuild: bool = False,
+                                          force_phase2_rebuild: bool = False) -> Dict[str, Any]:
         """
-        Main orchestration method using Claude Content Consolidation for all content types
+        Complete Two-Phase Knowledge Tree Build Process
+        ==============================================
+        Phase 1: Claude Content Consolidation & Tree Structure Building
+        Phase 2: Strategic Intelligence Analysis (5 Strategic Agents)
         """
-        print("🚀 Starting Claude-Powered Content Knowledge Tree Build Process...")
+        print("🚀 Starting Two-Phase Strategic Intelligence Build Process...")
+        print("=" * 80)
         
         # Get user from database to get both email and numeric ID
         user = await self.storage_manager.get_user_by_email(user_email)
@@ -30,185 +49,340 @@ class KnowledgeTreeOrchestrator:
         user_id = user['id']  # Numeric ID for storage operations
         
         # Check if we have recent knowledge tree and don't force rebuild
-        if not force_rebuild:
+        if not force_rebuild and not force_phase1_rebuild and not force_phase2_rebuild:
             existing_tree = await self._get_existing_tree(user_id)
             if existing_tree and self._is_tree_recent(existing_tree):
                 print("✅ Using existing recent knowledge tree")
                 return existing_tree
 
-        print("\n" + "="*50)
-        print("📄 CLAUDE CONTENT CONSOLIDATION")
-        print("="*50)
+        # =============================================================================
+        # PHASE 1: CLAUDE CONTENT CONSOLIDATION & TREE STRUCTURE BUILDING
+        # =============================================================================
+        print("\n" + "=" * 80)
+        print("🧠 PHASE 1: CLAUDE CONTENT CONSOLIDATION & TREE STRUCTURE BUILDING")
+        print("=" * 80)
+        print("🎯 Focus: Comprehensive topic/branch structure for accurate classification")
         
-        # Get ALL content for comprehensive analysis
-        print("📬 Fetching all content for comprehensive analysis...")
-        all_content = await self._collect_all_content(user_email)
-        print(f"📊 Retrieved {len(all_content)} total content items")
+        phase1_start = datetime.now()
         
-        if not all_content:
+        # 1.1. Multi-Source Content Aggregation
+        print("\n📬 Step 1.1: Multi-Source Content Aggregation...")
+        all_content_items = await self._aggregate_all_content_sources(user_id)
+        print(f"📊 Retrieved {len(all_content_items)} items from all sources")
+        
+        if not all_content_items:
             return self._create_empty_tree_response(user_id, user_email)
         
-        # Process content with Claude consolidation
-        knowledge_tree = await self.claude_consolidator.process_all_content(all_content, user_email)
+        # 1.2. Claude Content Consolidation (Smart chunking or all-at-once)
+        print(f"\n🧠 Step 1.2: Claude Content Consolidation...")
+        print(f"🎯 Building comprehensive tree structure with {len(all_content_items)} content items")
         
-        # Convert to legacy format for compatibility
-        legacy_tree = self.claude_consolidator.to_legacy_format(knowledge_tree)
-        legacy_tree['user_email'] = user_email
+        knowledge_tree = await self.claude_consolidator.process_all_content(
+            content_items=all_content_items,
+            user_email=user_email
+        )
         
-        # Store the knowledge tree using numeric user_id
+        print(f"✅ Built comprehensive knowledge tree:")
+        print(f"   📁 Topics: {len(knowledge_tree.topics)}")
+        print(f"   🤝 Relationships: {len(knowledge_tree.relationships)}")
+        print(f"   🏢 Business Domains: {len(knowledge_tree.business_domains)}")
+        print(f"   📅 Timeline Events: {len(knowledge_tree.timeline)}")
+        
+        phase1_duration = (datetime.now() - phase1_start).total_seconds()
+        print(f"\n✅ PHASE 1 COMPLETED in {phase1_duration:.2f} seconds")
+        
+        # =============================================================================
+        # PHASE 2: STRATEGIC INTELLIGENCE ANALYSIS (5 Strategic Agents)
+        # =============================================================================
+        print("\n" + "=" * 80)
+        print("🧠 PHASE 2: STRATEGIC INTELLIGENCE ANALYSIS")
+        print("=" * 80)
+        print("🚀 Running 5 Strategic Agents with Claude 4 Opus on organized tree...")
+        
+        phase2_start = datetime.now()
+        
+        # Convert knowledge tree to format expected by strategic analyzer
+        tree_context = self._convert_tree_to_strategic_context(knowledge_tree)
+        
+        # 2.1. Strategic Analysis with 5 Agents
+        strategic_analysis = await self.strategic_analyzer.analyze_strategic_intelligence_from_tree(
+            user_id=user_id,
+            knowledge_tree=knowledge_tree,
+            tree_context=tree_context
+        )
+        
+        phase2_duration = (datetime.now() - phase2_start).total_seconds()
+        print(f"\n✅ PHASE 2 COMPLETED in {phase2_duration:.2f} seconds")
+        print(f"🎯 Generated {strategic_analysis['total_insights']} strategic insights")
+        
+        # =============================================================================
+        # FINAL SYNTHESIS & STORAGE
+        # =============================================================================
+        print("\n" + "=" * 80)
+        print("🔗 FINAL SYNTHESIS & STORAGE")
+        print("=" * 80)
+        
+        # Combine Phase 1 and Phase 2 results into comprehensive knowledge tree
+        comprehensive_tree = self._synthesize_two_phase_results(
+            user_id=user_id,
+            user_email=user_email,
+            knowledge_tree=knowledge_tree,
+            strategic_analysis=strategic_analysis,
+            phase1_duration=phase1_duration,
+            phase2_duration=phase2_duration,
+            total_content_items=len(all_content_items)
+        )
+        
+        # Store the complete knowledge tree
         success = await self.storage_manager.store_knowledge_tree(
             user_id=user_id,
-            tree_data=legacy_tree,
-            analysis_type="claude_content_consolidation_v3"
+            tree_data=comprehensive_tree,
+            analysis_type="two_phase_claude_consolidation_v1"
         )
         
         if not success:
             raise Exception("Failed to store knowledge tree")
         
-        # Combine results for final output
-        final_results = {
+        total_duration = phase1_duration + phase2_duration
+        print(f"\n🎉 TWO-PHASE KNOWLEDGE TREE BUILD COMPLETE!")
+        print(f"⏱️  Phase 1 (Claude Consolidation): {phase1_duration:.2f}s")
+        print(f"⏱️  Phase 2 (Strategic Analysis): {phase2_duration:.2f}s")
+        print(f"⏱️  Total Processing Time: {total_duration:.2f}s")
+        print(f"📊 Content Sources Processed: {len(knowledge_tree.content_sources)}")
+        print(f"🏷️  Topics/Branches Identified: {len(knowledge_tree.topics)}")
+        print(f"🤝 Relationships Mapped: {len(knowledge_tree.relationships)}")
+        print(f"🎯 Strategic Insights: {strategic_analysis['total_insights']}")
+        
+        return {
             'success': True,
             'user_id': user_id,
             'user_email': user_email,
-            'knowledge_tree': legacy_tree,
+            'knowledge_tree': comprehensive_tree,
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat(),
             'processing_stats': {
-                'total_content_processed': knowledge_tree.metadata.get('total_content_processed', 0),
-                'total_batches': knowledge_tree.metadata.get('batch_count', 1),
+                'total_content_processed': len(all_content_items),
+                'content_sources': dict(knowledge_tree.content_sources),
                 'topics_identified': len(knowledge_tree.topics),
-                'relationships_analyzed': len(knowledge_tree.relationships),
-                'business_domains': len(knowledge_tree.business_domains),
-                'timeline_events': len(knowledge_tree.timeline),
-                'content_sources': len(knowledge_tree.content_sources)
+                'relationships_mapped': len(knowledge_tree.relationships),
+                'strategic_insights_generated': strategic_analysis['total_insights'],
+                'phase1_duration_seconds': phase1_duration,
+                'phase2_duration_seconds': phase2_duration,
+                'total_duration_seconds': total_duration,
+                'architecture': 'two_phase_claude_consolidation'
             },
-            'claude_metadata': {
-                'model_used': self.claude_consolidator.model,
-                'max_chars_per_batch': self.claude_consolidator.max_chars_per_request,
-                'processing_method': 'iterative_batch_consolidation',
-                'content_types_supported': ['email', 'document', 'slack', 'task', 'meeting', 'note']
-            },
-            'content_breakdown': knowledge_tree.content_sources
+            'architecture_metadata': {
+                'phase1_components': ['claude_content_consolidation', 'comprehensive_tree_building', 'topic_branch_structure'],
+                'phase2_components': ['business_development_agent', 'competitive_intelligence_agent', 
+                                    'network_analysis_agent', 'opportunity_matrix_agent', 'strategic_synthesizer'],
+                'model_used': 'claude-opus-4-20250514',
+                'processing_method': 'claude_consolidation_plus_strategic_analysis',
+                'content_types_supported': ['email', 'document', 'slack', 'task', 'meeting', 'note'],
+                'chunking_strategy': 'intelligent_batching_or_all_at_once'
+            }
         }
-        
-        print("\n🎯 Claude Content Knowledge Tree Build Complete!")
-        print(f"📊 Processed {final_results['processing_stats']['total_content_processed']} content items")
-        print(f"📦 Used {final_results['processing_stats']['total_batches']} Claude batches")
-        print(f"🏷️ Identified {final_results['processing_stats']['topics_identified']} topics")
-        print(f"🤝 Analyzed {final_results['processing_stats']['relationships_analyzed']} relationships")
-        print(f"📄 Content sources: {', '.join(knowledge_tree.content_sources.keys())}")
-        
-        return final_results
 
-    async def _collect_all_content(self, user_email: str) -> List[ContentItem]:
+    async def _aggregate_all_content_sources(self, user_id: int) -> List[ContentItem]:
         """
-        Collect all content from various sources and convert to ContentItem format
+        Aggregate ALL available content sources into standardized ContentItem format
         """
-        all_content = []
+        all_content_items = []
         
-        # Get user_id for database operations
-        user = await self.storage_manager.get_user_by_email(user_email)
-        if not user:
-            print(f"  ❌ User {user_email} not found")
-            return all_content
-        
-        user_id = user['id']  # Use numeric ID for database queries
-        
-        # 1. Get emails (current primary source)
-        print("📧 Collecting emails...")
+        # 1. Get Emails
+        print("📧 Aggregating emails...")
         try:
-            emails = await self.storage_manager.get_emails_for_user(user_id)  # FIXED: Use user_id instead of user_email
-            if emails:
-                email_content = ClaudeContentConsolidator.from_emails(emails)
-                all_content.extend(email_content)
-                print(f"  ✅ Added {len(email_content)} emails")
+            # Use the correct storage manager method
+            emails = await self.storage_manager.get_emails_for_user(user_id, limit=2000, time_window_days=365)
+            email_items = ClaudeContentConsolidator.from_emails(emails)
+            all_content_items.extend(email_items)
+            print(f"   ✅ Added {len(email_items)} emails")
+        except Exception as e:
+            print(f"   ⚠️ Error getting emails: {e}")
+        
+        # 2. Get Documents (if available)
+        print("📄 Aggregating documents...")
+        try:
+            # This would be implemented when document storage is available
+            # documents = self.storage_manager.get_documents(user_id)
+            # doc_items = ClaudeContentConsolidator.from_documents(documents)
+            # all_content_items.extend(doc_items)
+            print(f"   ⚠️ Document integration not yet implemented")
+        except Exception as e:
+            print(f"   ⚠️ Error getting documents: {e}")
+        
+        # 3. Get Slack Messages (if available)
+        print("💬 Aggregating Slack messages...")
+        try:
+            # This would be implemented when Slack integration is available
+            # slack_messages = self.storage_manager.get_slack_messages(user_id)
+            # slack_items = ClaudeContentConsolidator.from_slack_messages(slack_messages)
+            # all_content_items.extend(slack_items)
+            print(f"   ⚠️ Slack integration not yet implemented")
+        except Exception as e:
+            print(f"   ⚠️ Error getting Slack messages: {e}")
+        
+        # 4. Get Tasks/Meetings/Notes (if available)
+        print("📝 Aggregating tasks, meetings, notes...")
+        try:
+            # This would be implemented when these integrations are available
+            print(f"   ⚠️ Tasks/meetings/notes integration not yet implemented")
+        except Exception as e:
+            print(f"   ⚠️ Error getting additional content: {e}")
+        
+        print(f"📊 Total content items aggregated: {len(all_content_items)}")
+        return all_content_items
+
+    def _convert_tree_to_strategic_context(self, knowledge_tree) -> Dict[str, Any]:
+        """
+        Convert Claude knowledge tree to format expected by strategic analyzer
+        """
+        # Extract contact information from relationships
+        contacts = []
+        for email, relationship_data in knowledge_tree.relationships.items():
+            contact_info = {
+                'email': email,
+                'name': relationship_data.get('name', email.split('@')[0]),
+                'company': relationship_data.get('company', ''),
+                'role': relationship_data.get('role', 'contact'),
+                'relationship_status': relationship_data.get('relationship_status', 'unknown'),
+                'communication_summary': relationship_data.get('communication_summary', ''),
+                'topics_involved': relationship_data.get('topics_involved', []),
+                'last_interaction': relationship_data.get('last_interaction', ''),
+                'next_action': relationship_data.get('next_action', '')
+            }
+            contacts.append(contact_info)
+        
+        # Extract topic information
+        topics = []
+        for topic_name, topic_data in knowledge_tree.topics.items():
+            topic_info = {
+                'topic_name': topic_name,
+                'key_points': topic_data.get('key_points', []),
+                'participants': topic_data.get('participants', []),
+                'timeline_summary': topic_data.get('timeline_summary', ''),
+                'business_context': topic_data.get('business_context', ''),
+                'priority_level': topic_data.get('business_relevance', 'medium'),
+                'action_items': topic_data.get('action_items', [])
+            }
+            topics.append(topic_info)
+        
+        # Group contacts by relationship status
+        established_contacts = [c for c in contacts if c['relationship_status'] in ['established', 'ongoing']]
+        attempted_contacts = [c for c in contacts if c['relationship_status'] in ['attempted', 'cold']]
+        
+        # Group topics by priority
+        high_priority_topics = [t for t in topics if t['priority_level'] == 'high']
+        
+        return {
+            'established_contacts': established_contacts,
+            'attempted_contacts': attempted_contacts,
+            'high_priority_topics': high_priority_topics,
+            'all_topics': topics,
+            'all_contacts': contacts,
+            'business_domains': knowledge_tree.business_domains,
+            'total_contacts': len(contacts),
+            'engagement_rate': len(established_contacts) / len(contacts) if contacts else 0
+        }
+
+    def _convert_strategic_insights_to_dict(self, strategic_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert StrategicInsight objects to JSON-serializable dictionaries
+        """
+        serializable_analysis = {}
+        
+        for key, value in strategic_analysis.items():
+            if key == "agent_insights":
+                # Convert agent insights from StrategicInsight objects to dicts
+                serializable_insights = {}
+                for agent_name, insights in value.items():
+                    if isinstance(insights, list):
+                        serializable_insights[agent_name] = [
+                            asdict(insight) if isinstance(insight, StrategicInsight) else insight 
+                            for insight in insights
+                        ]
+                    else:
+                        serializable_insights[agent_name] = insights
+                serializable_analysis[key] = serializable_insights
+            elif key == "cross_domain_synthesis":
+                # Convert synthesis insights from StrategicInsight objects to dicts
+                if isinstance(value, list):
+                    serializable_analysis[key] = [
+                        asdict(insight) if isinstance(insight, StrategicInsight) else insight 
+                        for insight in value
+                    ]
+                else:
+                    serializable_analysis[key] = value
             else:
-                print(f"  ⚠️ No emails found for user {user_email}")
-        except Exception as e:
-            print(f"  ❌ Error getting emails: {e}")
+                # Keep other values as-is
+                serializable_analysis[key] = value
         
-        # 2. Get documents (future - placeholder for now)
-        print("📄 Collecting documents...")
-        try:
-            documents = await self._get_documents_for_user(user_email)
-            if documents:
-                doc_content = ClaudeContentConsolidator.from_documents(documents)
-                all_content.extend(doc_content)
-                print(f"  ✅ Added {len(doc_content)} documents")
-        except Exception as e:
-            print(f"  ⚠️ Documents not available yet: {e}")
+        return serializable_analysis
+
+    def _synthesize_two_phase_results(self, user_id: int, user_email: str, 
+                                    knowledge_tree, strategic_analysis: Dict,
+                                    phase1_duration: float, phase2_duration: float,
+                                    total_content_items: int) -> Dict[str, Any]:
+        """
+        Synthesize Phase 1 (Claude Consolidation) and Phase 2 (Strategic Analysis) results
+        """
+        # Convert StrategicInsight objects to JSON-serializable dictionaries
+        serializable_strategic_analysis = self._convert_strategic_insights_to_dict(strategic_analysis)
         
-        # 3. Get Slack messages (future - placeholder for now)
-        print("💬 Collecting Slack messages...")
-        try:
-            slack_messages = await self._get_slack_messages_for_user(user_email)
-            if slack_messages:
-                slack_content = ClaudeContentConsolidator.from_slack_messages(slack_messages)
-                all_content.extend(slack_content)
-                print(f"  ✅ Added {len(slack_content)} Slack messages")
-        except Exception as e:
-            print(f"  ⚠️ Slack not available yet: {e}")
-        
-        # 4. Get tasks/todos (future - placeholder for now)
-        print("✅ Collecting tasks...")
-        try:
-            tasks = await self._get_tasks_for_user(user_email)
-            if tasks:
-                task_content = self._convert_tasks_to_content(tasks)
-                all_content.extend(task_content)
-                print(f"  ✅ Added {len(task_content)} tasks")
-        except Exception as e:
-            print(f"  ⚠️ Tasks not available yet: {e}")
-        
-        # 5. Get meeting notes (future - placeholder for now)
-        print("🤝 Collecting meeting notes...")
-        try:
-            meetings = await self._get_meetings_for_user(user_email)
-            if meetings:
-                meeting_content = self._convert_meetings_to_content(meetings)
-                all_content.extend(meeting_content)
-                print(f"  ✅ Added {len(meeting_content)} meetings")
-        except Exception as e:
-            print(f"  ⚠️ Meetings not available yet: {e}")
-        
-        print(f"📋 Total content collected: {len(all_content)} items")
-        return all_content
-
-    # Future content source methods (placeholders for extensibility)
-    async def _get_documents_for_user(self, user_email: str) -> List[Dict]:
-        """Get documents for user (future implementation)"""
-        # TODO: Implement document retrieval from Google Drive, Dropbox, etc.
-        return []
-
-    async def _get_slack_messages_for_user(self, user_email: str) -> List[Dict]:
-        """Get Slack messages for user (future implementation)"""
-        # TODO: Implement Slack API integration
-        return []
-
-    async def _get_tasks_for_user(self, user_email: str) -> List[Dict]:
-        """Get tasks/todos for user (future implementation)"""
-        # TODO: Implement task management integration (Todoist, Asana, etc.)
-        return []
-
-    async def _get_meetings_for_user(self, user_email: str) -> List[Dict]:
-        """Get meeting notes for user (future implementation)"""
-        # TODO: Implement meeting notes from calendar, Zoom, etc.
-        return []
-
-    def _convert_tasks_to_content(self, tasks: List[Dict]) -> List[ContentItem]:
-        """Convert tasks to ContentItem format (future implementation)"""
-        # TODO: Implement task to ContentItem conversion
-        return []
-
-    def _convert_meetings_to_content(self, meetings: List[Dict]) -> List[ContentItem]:
-        """Convert meetings to ContentItem format (future implementation)"""
-        # TODO: Implement meeting to ContentItem conversion
-        return []
+        return {
+            # Tree metadata
+            "tree_type": "two_phase_claude_consolidation_v1",
+            "user_id": user_id,
+            "user_email": user_email,
+            "build_timestamp": datetime.now().isoformat(),
+            "architecture": "claude_consolidation_plus_strategic_analysis",
+            
+            # Phase 1 Results: Claude Content Consolidation & Tree Structure
+            "phase1_claude_tree": {
+                "topics": dict(knowledge_tree.topics),
+                "relationships": dict(knowledge_tree.relationships),
+                "business_domains": dict(knowledge_tree.business_domains),
+                "timeline": knowledge_tree.timeline,
+                "content_sources": dict(knowledge_tree.content_sources),
+                "tree_metadata": dict(knowledge_tree.metadata)
+            },
+            
+            # Phase 2 Results: Strategic Intelligence Analysis (now JSON serializable)
+            "phase2_strategic_analysis": serializable_strategic_analysis,
+            
+            # Performance metrics
+            "processing_performance": {
+                "phase1_duration_seconds": phase1_duration,
+                "phase2_duration_seconds": phase2_duration,
+                "total_duration_seconds": phase1_duration + phase2_duration,
+                "content_processed": total_content_items,
+                "content_sources_processed": len(knowledge_tree.content_sources),
+                "topics_identified": len(knowledge_tree.topics),
+                "relationships_mapped": len(knowledge_tree.relationships),
+                "strategic_insights": serializable_strategic_analysis.get('total_insights', 0)
+            },
+            
+            # Legacy compatibility for existing APIs
+            "core_facts": dict(knowledge_tree.business_domains),
+            "relationships": [{"source": topic, "target": ", ".join(subtopics)} 
+                            for topic, subtopics in knowledge_tree.business_domains.items()],
+            "timeline": knowledge_tree.timeline,
+            "strategic_intelligence": serializable_strategic_analysis.get('agent_insights', {}),
+            "cross_domain_synthesis": serializable_strategic_analysis.get('cross_domain_synthesis', []),
+            
+            # New comprehensive structure
+            "comprehensive_knowledge_tree": {
+                "topics": dict(knowledge_tree.topics),
+                "relationships": dict(knowledge_tree.relationships),
+                "business_domains": dict(knowledge_tree.business_domains),
+                "timeline": knowledge_tree.timeline,
+                "strategic_insights": serializable_strategic_analysis.get('agent_insights', {}),
+                "content_sources": dict(knowledge_tree.content_sources)
+            }
+        }
 
     async def iterate_knowledge_tree(self, user_email: str) -> Dict[str, Any]:
         """
-        Iterate/update existing knowledge tree
-        For Claude consolidation, this rebuilds with all content since Claude handles incremental analysis
+        Iterate/update existing knowledge tree with Claude consolidation
         """
         print("🔄 Starting Knowledge Tree Iteration with Claude Content Consolidation...")
         
@@ -245,23 +419,17 @@ class KnowledgeTreeOrchestrator:
             'knowledge_tree': {
                 'user_email': user_email,
                 'created_at': datetime.now().isoformat(),
-                'version': "3.0_claude_content_consolidation",
-                'analysis_depth': "claude_iterative_content_consolidation",
+                'version': "4.0_claude_content_consolidation",
+                'analysis_depth': "claude_comprehensive_tree_building",
                 'contact_count': 0,
                 'content_count': 0,
                 'entities': [],
-                'topics': [],
+                'topics': {},
                 'business_domains': {},
                 'insights': [],
-                'relationships': [],
+                'relationships': {},
                 'content_sources': {},
-                'multidimensional_analysis': {
-                    'hierarchical_levels': 0,
-                    'topic_count': 0,
-                    'relationship_count': 0,
-                    'batch_count': 0,
-                    'content_source_diversity': 0
-                }
+                'architecture': 'claude_consolidation_plus_strategic_analysis'
             },
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat(),
@@ -279,7 +447,7 @@ class KnowledgeTreeOrchestrator:
                     "user_email": user_email,
                     "has_knowledge_tree": False,
                     "error": f"User {user_email} not found",
-                    "processing_method": "claude_content_consolidation"
+                    "processing_method": "claude_content_consolidation_plus_strategic_analysis"
                 }
             
             user_id = user['id']
@@ -292,19 +460,29 @@ class KnowledgeTreeOrchestrator:
                 "has_knowledge_tree": has_tree,
                 "last_updated": None,
                 "statistics": {},
-                "processing_method": "claude_content_consolidation"
+                "processing_method": "claude_content_consolidation_plus_strategic_analysis"
             }
             
             if has_tree:
                 status["last_updated"] = tree.get("created_at")
+                
+                # Extract statistics from comprehensive tree structure
+                phase1_data = tree.get("phase1_claude_tree", {})
+                phase2_data = tree.get("phase2_strategic_analysis", {})
+                
                 status["statistics"] = {
-                    "content_count": tree.get("content_count", 0),
-                    "contact_count": tree.get("contact_count", 0),
-                    "topic_count": len(tree.get("topics", [])),
-                    "business_domains": len(tree.get("business_domains", {})),
-                    "claude_batches": tree.get("claude_metadata", {}).get("total_batches", 0),
-                    "content_sources": tree.get("content_sources", {}),
-                    "content_source_diversity": len(tree.get("content_sources", {}))
+                    "content_count": tree.get("processing_performance", {}).get("content_processed", 0),
+                    "content_sources": len(phase1_data.get("content_sources", {})),
+                    "topics_count": len(phase1_data.get("topics", {})),
+                    "relationships_count": len(phase1_data.get("relationships", {})),
+                    "business_domains": len(phase1_data.get("business_domains", {})),
+                    "strategic_insights": phase2_data.get("total_insights", 0),
+                    "content_source_breakdown": dict(phase1_data.get("content_sources", {})),
+                    "processing_times": {
+                        "phase1_seconds": tree.get("processing_performance", {}).get("phase1_duration_seconds", 0),
+                        "phase2_seconds": tree.get("processing_performance", {}).get("phase2_duration_seconds", 0),
+                        "total_seconds": tree.get("processing_performance", {}).get("total_duration_seconds", 0)
+                    }
                 }
                 
             return status
@@ -314,5 +492,5 @@ class KnowledgeTreeOrchestrator:
                 "user_email": user_email,
                 "has_knowledge_tree": False,
                 "error": str(e),
-                "processing_method": "claude_content_consolidation"
+                "processing_method": "claude_content_consolidation_plus_strategic_analysis"
             } 

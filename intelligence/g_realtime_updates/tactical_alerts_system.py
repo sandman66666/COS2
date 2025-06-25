@@ -171,7 +171,7 @@ Format response as JSON:
         try:
             response = await asyncio.to_thread(
                 claude_client.messages.create,
-                model="claude-3-opus-20240229",
+                model="claude-opus-4-20250514",
                 max_tokens=2000,
                 temperature=0.1,  # Low temperature for factual analysis
                 messages=[{"role": "user", "content": prompt}]

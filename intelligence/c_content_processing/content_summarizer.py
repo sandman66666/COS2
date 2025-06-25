@@ -9,7 +9,7 @@ from typing import Dict, List, Set, Tuple
 from dataclasses import dataclass
 from collections import Counter
 
-from .data_organizer import ContentItem, TopicCluster, OrganizedContent
+from intelligence.b_data_collection.data_organizer import ContentItem, TopicCluster, OrganizedContent
 
 @dataclass
 class ContentSummary:

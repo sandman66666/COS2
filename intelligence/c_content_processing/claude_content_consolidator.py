@@ -52,7 +52,7 @@ class ClaudeContentConsolidator:
     def __init__(self, claude_api_key: str):
         self.claude_client = anthropic.Anthropic(api_key=claude_api_key)
         self.max_chars_per_request = 180000  # Stay under Claude's 200k context window
-        self.model = "claude-3-5-sonnet-20241022"
+        self.model = "claude-opus-4-20250514"  # Use Claude 4 Opus
 
     async def process_all_content(self, content_items: List[ContentItem], user_email: str) -> KnowledgeTree:
         """
@@ -244,7 +244,13 @@ Focus on extracting real business intelligence, relationship dynamics, and strat
 
         try:
             response = await self._call_claude(prompt)
-            tree_data = json.loads(response)
+            # DEBUG: Log the response before parsing
+            print(f"🔍 DEBUG: Claude response length: {len(response)} chars")
+            print(f"🔍 DEBUG: First 200 chars: {response[:200]}")
+            print(f"🔍 DEBUG: Last 200 chars: {response[-200:]}")
+            
+            # Extract JSON from Claude's response
+            tree_data = self._extract_json_from_response(response)
             
             return KnowledgeTree(
                 topics=tree_data.get('topics', {}),
@@ -261,6 +267,17 @@ Focus on extracting real business intelligence, relationship dynamics, and strat
                 }
             )
             
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON parsing error: {e}")
+            print(f"🔍 DEBUG: Full response content:")
+            print("=" * 100)
+            print(response)
+            print("=" * 100)
+            # Return empty tree on JSON error
+            return KnowledgeTree(
+                topics={}, relationships={}, business_domains={}, timeline=[], 
+                content_sources={}, metadata={'json_error': str(e), 'response_length': len(response)}
+            )
         except Exception as e:
             print(f"❌ Error processing initial batch: {e}")
             # Return empty tree on error
@@ -322,7 +339,13 @@ Focus on consolidation and enhancement rather than replacement.
 
         try:
             response = await self._call_claude(prompt)
-            updated_tree_data = json.loads(response)
+            # DEBUG: Log the response before parsing
+            print(f"🔍 DEBUG: Batch {batch.batch_number} Claude response length: {len(response)} chars")
+            print(f"🔍 DEBUG: Batch {batch.batch_number} First 200 chars: {response[:200]}")
+            print(f"🔍 DEBUG: Batch {batch.batch_number} Last 200 chars: {response[-200:]}")
+            
+            # Extract JSON from Claude's response
+            updated_tree_data = self._extract_json_from_response(response)
             
             # Update content sources
             updated_content_sources = existing_tree.content_sources.copy()
@@ -349,6 +372,14 @@ Focus on consolidation and enhancement rather than replacement.
                 metadata=updated_metadata
             )
             
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON parsing error in batch {batch.batch_number}: {e}")
+            print(f"🔍 DEBUG: Batch {batch.batch_number} Full response content:")
+            print("=" * 100)
+            print(response)
+            print("=" * 100)
+            # Return existing tree on JSON error
+            return existing_tree
         except Exception as e:
             print(f"❌ Error augmenting tree with batch {batch.batch_number}: {e}")
             # Return existing tree on error
@@ -566,3 +597,88 @@ Content: {content_preview}
             content_items.append(item)
         
         return content_items 
+
+    def _extract_json_from_response(self, response: str) -> Dict:
+        """Extract JSON from Claude's response"""
+        try:
+            # Method 1: Try parsing the entire response as JSON first
+            return json.loads(response)
+        except json.JSONDecodeError:
+            pass
+        
+        # Method 2: Look for JSON block markers
+        json_markers = [
+            '```json',
+            '```JSON', 
+            '```',
+            '{'
+        ]
+        
+        for marker in json_markers:
+            start_idx = response.find(marker)
+            if start_idx != -1:
+                if marker.startswith('```'):
+                    # Skip the marker line
+                    start_idx = response.find('\n', start_idx) + 1
+                    # Find the end marker
+                    if marker == '```json' or marker == '```JSON':
+                        end_marker = '```'
+                    else:
+                        end_marker = '```'
+                    end_idx = response.find(end_marker, start_idx)
+                    if end_idx != -1:
+                        json_block = response[start_idx:end_idx].strip()
+                    else:
+                        # No end marker found, take from start to end
+                        json_block = response[start_idx:].strip()
+                else:
+                    # Find the JSON block boundaries
+                    json_start = response.find('{', start_idx)
+                    if json_start == -1:
+                        continue
+                    
+                    # Find matching closing brace
+                    brace_count = 0
+                    json_end = json_start
+                    for i, char in enumerate(response[json_start:], json_start):
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_end = i
+                                break
+                    
+                    json_block = response[json_start:json_end+1]
+                
+                # Try to parse the extracted JSON
+                try:
+                    return json.loads(json_block)
+                except json.JSONDecodeError as e:
+                    print(f"🔍 DEBUG: Failed to parse JSON block with marker '{marker}': {e}")
+                    print(f"🔍 DEBUG: Extracted block: {json_block[:200]}...")
+                    continue
+        
+        # Method 3: Look for any JSON-like structure
+        import re
+        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        matches = re.findall(json_pattern, response, re.DOTALL)
+        
+        for match in matches:
+            try:
+                return json.loads(match)
+            except json.JSONDecodeError:
+                continue
+        
+        # If all methods fail, create a minimal structure
+        print(f"❌ Could not extract JSON from Claude response")
+        print(f"🔍 DEBUG: Response sample: {response[:500]}...")
+        
+        return {
+            "topics": {},
+            "relationships": {},
+            "business_domains": {},
+            "timeline": [],
+            "error": "Failed to parse Claude response",
+            "raw_response": response[:1000]  # Include sample for debugging
+        } 

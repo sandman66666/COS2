@@ -34,7 +34,7 @@ class BaseClaudeAnalyst:
     def __init__(self, analyst_type: str, model: str = None):
         self.analyst_type = analyst_type
         # Use environment variable for model instead of hardcoded value
-        self.model = model or os.getenv('CLAUDE_MODEL', 'claude-3-opus-20240229')
+        self.model = model or os.getenv('CLAUDE_MODEL', 'claude-opus-4-20250514')  # Use Claude 4 Opus
         
         # Use environment variable for API key instead of config import
         api_key = os.getenv('ANTHROPIC_API_KEY')

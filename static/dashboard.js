@@ -3108,111 +3108,130 @@ async function checkAndEnableExistingDataButtons() {
 
 // Check if a step has existing data in the database
 async function checkStepHasExistingData(stepId) {
+    console.log(`🔍 Checking existing data for step: ${stepId}`);
     try {
         switch (stepId) {
             case 'contacts':
+                console.log(`📞 Checking contacts data...`);
                 const contactsResponse = await fetch('/api/contacts?limit=1');
                 const contactsData = await contactsResponse.json();
-                return contactsData.success && contactsData.total > 0;
+                const hasContacts = contactsData.success && contactsData.total > 0;
+                console.log(`📞 Contacts result: ${hasContacts}, total: ${contactsData.total}`);
+                return hasContacts;
                 
             case 'emails':
+                console.log(`📧 Checking emails data...`);
                 const emailsResponse = await fetch('/api/inspect/emails?limit=1');
                 const emailsData = await emailsResponse.json();
-                return emailsData.success && emailsData.total_emails > 0;
+                const hasEmails = emailsData.success && emailsData.total_emails > 0;
+                console.log(`📧 Emails result: ${hasEmails}, total: ${emailsData.total_emails}`);
+                return hasEmails;
                 
             case 'augment':
+                console.log(`🔬 Checking enrichment data...`);
                 // Check for enriched contacts using the real API endpoint
                 const enrichmentResponse = await fetch('/api/intelligence/enrichment-results?format=summary&limit=1');
+                console.log(`🔬 Enrichment API response status: ${enrichmentResponse.status}`);
                 if (enrichmentResponse.ok) {
                     const enrichmentData = await enrichmentResponse.json();
+                    console.log(`🔬 Enrichment API data:`, enrichmentData);
                     if (enrichmentData.success && enrichmentData.data && enrichmentData.data.statistics.enriched_contacts > 0) {
-                        return {
-                            success: true,
-                            message: `Found ${enrichmentData.data.statistics.enriched_contacts} enriched contacts`,
-                            stats: {
-                                contacts_processed: enrichmentData.data.statistics.total_contacts,
-                                successfully_enriched: enrichmentData.data.statistics.enriched_contacts,
-                                success_rate: enrichmentData.data.statistics.enrichment_rate,
-                                sources_used: 3 // Estimated
-                            },
-                            enriched_contacts: enrichmentData.data.contacts,
-                            source: 'database'
-                        };
+                        console.log(`🔬 Found ${enrichmentData.data.statistics.enriched_contacts} enriched contacts via API`);
+                        return true; // Return boolean instead of complex object
                     }
                 }
                 // Fallback: check contacts API for enrichment data
+                console.log(`🔬 Fallback: checking contacts for enrichment data...`);
                 const contactsInspectResponse = await fetch('/api/inspect/contacts');
+                console.log(`🔬 Contacts inspect response status: ${contactsInspectResponse.status}`);
                 if (contactsInspectResponse.ok) {
                     const contactsData = await contactsInspectResponse.json();
+                    console.log(`🔬 Contacts inspect data success: ${contactsData.success}, total contacts: ${contactsData.total_contacts}`);
                     if (contactsData.success && contactsData.contacts) {
                         const enrichedContacts = contactsData.contacts.filter(c => c.has_augmentation || c.enrichment_status === 'enriched');
-                        if (enrichedContacts.length > 0) {
-                            return {
-                                success: true,
-                                message: `Found ${enrichedContacts.length} enriched contacts from database`,
-                                stats: {
-                                    contacts_processed: contactsData.total_contacts,
-                                    successfully_enriched: enrichedContacts.length,
-                                    success_rate: enrichedContacts.length / Math.max(contactsData.total_contacts, 1),
-                                    sources_used: 3
-                                },
-                                enriched_contacts: enrichedContacts,
-                                source: 'database'
-                            };
-                        }
+                        console.log(`🔬 Found ${enrichedContacts.length} enriched contacts via fallback`);
+                        return enrichedContacts.length > 0; // Return boolean instead of complex object
                     }
                 }
-                break;
+                console.log(`🔬 No enrichment data found`);
+                return false; // Return false if no enrichment data found
                 
             case 'tree':
+                console.log(`🌳 Checking knowledge tree data...`);
                 const treeResponse = await fetch('/api/inspect/knowledge-tree');
                 const treeData = await treeResponse.json();
-                return treeData.success && treeData.knowledge_tree !== null;
+                const hasTree = treeData.success && treeData.knowledge_tree !== null;
+                console.log(`🌳 Knowledge tree result: ${hasTree}`);
+                return hasTree;
                 
             case 'intelligence':
+                console.log(`🧠 Checking intelligence data...`);
                 // Intelligence is integrated in knowledge tree, so check for tree
                 const intelligenceResponse = await fetch('/api/inspect/knowledge-tree');
                 const intelligenceData = await intelligenceResponse.json();
-                return intelligenceData.success && intelligenceData.knowledge_tree !== null;
+                const hasIntelligence = intelligenceData.success && intelligenceData.knowledge_tree !== null;
+                console.log(`🧠 Intelligence result: ${hasIntelligence}`);
+                return hasIntelligence;
                 
             default:
+                console.log(`❓ Unknown step: ${stepId}`);
                 return false;
         }
     } catch (error) {
-        console.warn(`Error checking existing data for ${stepId}:`, error);
+        console.warn(`❌ Error checking existing data for ${stepId}:`, error);
         return false;
     }
 }
 
 function enableViewResultsButton(stepId, title) {
+    console.log(`✅ Enabling View Results button for step: ${stepId}, title: ${title}`);
     const viewButton = document.getElementById(`view-results-${stepId}`);
     const inspectButton = document.getElementById(`inspect-results-${stepId}`);
+    
+    console.log(`✅ View button element:`, viewButton);
+    console.log(`✅ Inspect button element:`, inspectButton);
     
     if (viewButton) {
         viewButton.disabled = false;
         viewButton.title = title || 'View results from database';
         viewButton.style.opacity = '1';
+        console.log(`✅ View button enabled for ${stepId}`);
+    } else {
+        console.warn(`❌ View button not found for ${stepId}`);
     }
     if (inspectButton) {
         inspectButton.disabled = false;
         inspectButton.title = title || 'Inspect results from database';
         inspectButton.style.opacity = '1';
+        console.log(`✅ Inspect button enabled for ${stepId}`);
+    } else {
+        console.warn(`❌ Inspect button not found for ${stepId}`);
     }
 }
 
 function disableViewResultsButton(stepId, title) {
+    console.log(`❌ Disabling View Results button for step: ${stepId}, title: ${title}`);
     const viewButton = document.getElementById(`view-results-${stepId}`);
     const inspectButton = document.getElementById(`inspect-results-${stepId}`);
+    
+    console.log(`❌ View button element:`, viewButton);
+    console.log(`❌ Inspect button element:`, inspectButton);
     
     if (viewButton) {
         viewButton.disabled = true;
         viewButton.title = title || 'No data available';
         viewButton.style.opacity = '0.5';
+        console.log(`❌ View button disabled for ${stepId}`);
+    } else {
+        console.warn(`❌ View button not found for ${stepId}`);
     }
     if (inspectButton) {
         inspectButton.disabled = true;
         inspectButton.title = title || 'No data available';
         inspectButton.style.opacity = '0.5';
+        console.log(`❌ Inspect button disabled for ${stepId}`);
+    } else {
+        console.warn(`❌ Inspect button not found for ${stepId}`);
     }
 }
 
@@ -4586,34 +4605,356 @@ function formatAugmentResults(result) {
 }
 
 function formatTreeResults(result) {
-    const tree = result.knowledge_tree || {};
-    const metadata = tree.analysis_metadata || {};
+    // Extract data from both possible result structures
+    const tree = result.knowledge_tree || result;
+    const analysisStats = result.analysis_summary || result.processing_stats || {};
+    const contentBreakdown = result.content_breakdown || {};
+    
+    // Build comprehensive stats
+    const stats = {
+        topics: Object.keys(tree.topics || {}).length,
+        relationships: Object.keys(tree.relationships || {}).length,
+        businessDomains: Object.keys(tree.business_domains || {}).length,
+        timelineEvents: (tree.timeline || []).length,
+        emailsAnalyzed: analysisStats.emails_analyzed || 0,
+        contactsIntegrated: analysisStats.contacts_integrated || 0,
+        claudeBatches: analysisStats.claude_batches_used || 0,
+        systemVersion: analysisStats.system_version || 'Claude 4 Opus'
+    };
+    
     return `
-        <div class="formatted-results">
-            <div class="results-summary">
-                <h4>🌳 Knowledge Tree Summary</h4>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <span class="stat-number">${metadata.emails_analyzed || 0}</span>
-                        <span class="stat-label">Emails Analyzed</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">${metadata.contacts_integrated || 0}</span>
-                        <span class="stat-label">Contacts Integrated</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">${Object.keys(tree.domain_hierarchy || {}).length}</span>
-                        <span class="stat-label">Strategic Domains</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">${metadata.system_version || 'v2.0'}</span>
-                        <span class="stat-label">System Version</span>
-                    </div>
+        <div class="knowledge-tree-viewer">
+            <div class="tree-header">
+                <h3>🌳 Knowledge Tree - Strategic Intelligence</h3>
+                <p>Comprehensive analysis powered by ${stats.systemVersion}</p>
+            </div>
+            
+            <!-- Stats Overview -->
+            <div class="tree-stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">${stats.topics}</div>
+                    <div class="stat-label">Topics Identified</div>
                 </div>
-                ${result.message ? `<p class="result-message">${result.message}</p>` : ''}
+                <div class="stat-card">
+                    <div class="stat-number">${stats.relationships}</div>
+                    <div class="stat-label">Relationships</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.businessDomains}</div>
+                    <div class="stat-label">Business Domains</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.emailsAnalyzed}</div>
+                    <div class="stat-label">Emails Analyzed</div>
+                </div>
+            </div>
+            
+            <!-- Navigation Tabs -->
+            <div class="tree-nav-tabs">
+                <button class="tree-tab-btn active" onclick="showTreeTab(event, 'topics-view')">📊 Topics</button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'relationships-view')">🤝 Relationships</button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'domains-view')">🏢 Business Domains</button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'timeline-view')">📅 Timeline</button>
+                <button class="tree-tab-btn" onclick="showTreeTab(event, 'raw-data-view')">🔍 Raw Data</button>
+            </div>
+            
+            <!-- Tab Contents -->
+            <div id="topics-view" class="tree-tab-content active">
+                <h4>📊 Strategic Topics</h4>
+                <div class="topics-grid">
+                    ${generateTopicsView(tree.topics || {})}
+                </div>
+            </div>
+            
+            <div id="relationships-view" class="tree-tab-content">
+                <h4>🤝 Relationship Intelligence</h4>
+                <div class="relationships-grid">
+                    ${generateRelationshipsView(tree.relationships || {})}
+                </div>
+            </div>
+            
+            <div id="domains-view" class="tree-tab-content">
+                <h4>🏢 Business Domain Analysis</h4>
+                <div class="domains-grid">
+                    ${generateBusinessDomainsView(tree.business_domains || {})}
+                </div>
+            </div>
+            
+            <div id="timeline-view" class="tree-tab-content">
+                <h4>📅 Strategic Timeline</h4>
+                <div class="timeline-container">
+                    ${generateTimelineView(tree.timeline || [])}
+                </div>
+            </div>
+            
+            <div id="raw-data-view" class="tree-tab-content">
+                <h4>🔍 Complete Data Structure</h4>
+                <pre class="tree-json-view">${JSON.stringify(tree, null, 2)}</pre>
             </div>
         </div>
+        
+        <style>
+            .knowledge-tree-viewer {
+                max-width: 100%;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+            
+            .tree-header {
+                text-align: center;
+                margin-bottom: 20px;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border-radius: 10px;
+            }
+            
+            .tree-header h3 {
+                margin: 0;
+                font-size: 1.5em;
+            }
+            
+            .tree-stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+                margin-bottom: 20px;
+            }
+            
+            .stat-card {
+                background: white;
+                padding: 15px;
+                border-radius: 8px;
+                text-align: center;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                border: 1px solid #e0e0e0;
+            }
+            
+            .stat-number {
+                font-size: 1.8em;
+                font-weight: bold;
+                color: #3498db;
+                margin-bottom: 5px;
+            }
+            
+            .stat-label {
+                color: #666;
+                font-size: 0.9em;
+            }
+            
+            .tree-nav-tabs {
+                display: flex;
+                border-bottom: 2px solid #e0e0e0;
+                margin-bottom: 20px;
+                overflow-x: auto;
+            }
+            
+            .tree-tab-btn {
+                padding: 12px 20px;
+                border: none;
+                background: none;
+                cursor: pointer;
+                border-bottom: 3px solid transparent;
+                font-size: 0.9em;
+                white-space: nowrap;
+                transition: all 0.3s ease;
+            }
+            
+            .tree-tab-btn:hover {
+                background: #f8f9fa;
+            }
+            
+            .tree-tab-btn.active {
+                border-bottom-color: #3498db;
+                color: #3498db;
+                font-weight: bold;
+            }
+            
+            .tree-tab-content {
+                display: none;
+                animation: fadeIn 0.3s ease;
+            }
+            
+            .tree-tab-content.active {
+                display: block;
+            }
+            
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            
+            .topics-grid, .relationships-grid, .domains-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 15px;
+            }
+            
+            .topic-card, .relationship-card, .domain-card {
+                background: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 20px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            
+            .topic-card:hover, .relationship-card:hover, .domain-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            }
+            
+            .card-title {
+                font-size: 1.1em;
+                font-weight: bold;
+                color: #2c3e50;
+                margin-bottom: 10px;
+                border-bottom: 2px solid #3498db;
+                padding-bottom: 5px;
+            }
+            
+            .card-detail {
+                margin-bottom: 8px;
+                font-size: 0.9em;
+                line-height: 1.4;
+            }
+            
+            .card-detail strong {
+                color: #3498db;
+            }
+            
+            .timeline-container {
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            
+            .timeline-item {
+                background: white;
+                border-left: 4px solid #3498db;
+                padding: 15px;
+                margin-bottom: 10px;
+                border-radius: 0 8px 8px 0;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            }
+            
+            .timeline-date {
+                font-weight: bold;
+                color: #3498db;
+                margin-bottom: 5px;
+            }
+            
+            .tree-json-view {
+                background: #2c3e50;
+                color: #ecf0f1;
+                padding: 20px;
+                border-radius: 5px;
+                overflow-x: auto;
+                font-size: 0.8em;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+            
+            .no-data {
+                text-align: center;
+                color: #666;
+                font-style: italic;
+                padding: 20px;
+                background: #f8f9fa;
+                border-radius: 5px;
+            }
+        </style>
     `;
+}
+
+// Helper functions for generating views
+function generateTopicsView(topics) {
+    if (Object.keys(topics).length === 0) {
+        return '<div class="no-data">No topics identified yet. Run the knowledge tree analysis to see strategic topics.</div>';
+    }
+    
+    return Object.entries(topics).map(([topicName, topicData]) => `
+        <div class="topic-card">
+            <div class="card-title">${topicName.replace(/_/g, ' ')}</div>
+            <div class="card-detail"><strong>Participants:</strong> ${(topicData.participants || []).slice(0, 3).join(', ')}${(topicData.participants || []).length > 3 ? '...' : ''}</div>
+            <div class="card-detail"><strong>Business Relevance:</strong> ${topicData.business_relevance || 'Unknown'}</div>
+            <div class="card-detail"><strong>Action Items:</strong> ${(topicData.action_items || []).length}</div>
+            <div class="card-detail"><strong>Key Points:</strong> ${(topicData.key_points || []).slice(0, 2).join('; ')}${(topicData.key_points || []).length > 2 ? '...' : ''}</div>
+            <div class="card-detail"><strong>Content Sources:</strong> ${(topicData.content_sources || []).join(', ')}</div>
+        </div>
+    `).join('');
+}
+
+function generateRelationshipsView(relationships) {
+    if (Object.keys(relationships).length === 0) {
+        return '<div class="no-data">No relationships analyzed yet. Build the knowledge tree to see relationship intelligence.</div>';
+    }
+    
+    return Object.entries(relationships).map(([email, relationshipData]) => `
+        <div class="relationship-card">
+            <div class="card-title">${email}</div>
+            <div class="card-detail"><strong>Status:</strong> <span style="color: ${getStatusColor(relationshipData.status)}">${relationshipData.status || 'Unknown'}</span></div>
+            <div class="card-detail"><strong>Frequency:</strong> ${relationshipData.frequency || 'Unknown'}</div>
+            <div class="card-detail"><strong>Engagement Level:</strong> ${Math.round((relationshipData.engagement_level || 0) * 100)}%</div>
+            <div class="card-detail"><strong>Business Context:</strong> ${(relationshipData.business_context || 'None').substring(0, 100)}${(relationshipData.business_context || '').length > 100 ? '...' : ''}</div>
+            <div class="card-detail"><strong>Topics Involved:</strong> ${(relationshipData.topics_involved || []).slice(0, 3).join(', ')}${(relationshipData.topics_involved || []).length > 3 ? '...' : ''}</div>
+        </div>
+    `).join('');
+}
+
+function generateBusinessDomainsView(businessDomains) {
+    if (Object.keys(businessDomains).length === 0) {
+        return '<div class="no-data">No business domains identified yet. Complete the knowledge tree analysis to see domain breakdown.</div>';
+    }
+    
+    return Object.entries(businessDomains).map(([domain, topics]) => `
+        <div class="domain-card">
+            <div class="card-title">${domain.replace(/_/g, ' ').toUpperCase()}</div>
+            <div class="card-detail"><strong>Related Topics:</strong> ${Array.isArray(topics) ? topics.length : Object.keys(topics).length}</div>
+            <div class="card-detail"><strong>Items:</strong> ${Array.isArray(topics) ? topics.slice(0, 3).join(', ') : Object.keys(topics).slice(0, 3).join(', ')}${(Array.isArray(topics) ? topics.length : Object.keys(topics).length) > 3 ? '...' : ''}</div>
+        </div>
+    `).join('');
+}
+
+function generateTimelineView(timeline) {
+    if (timeline.length === 0) {
+        return '<div class="no-data">No timeline events found. The knowledge tree analysis will generate strategic timeline events.</div>';
+    }
+    
+    return timeline.map(event => `
+        <div class="timeline-item">
+            <div class="timeline-date">${event.date}</div>
+            <div class="card-detail"><strong>Event:</strong> ${event.event}</div>
+            <div class="card-detail"><strong>Participants:</strong> ${(event.participants || []).join(', ')}</div>
+            <div class="card-detail"><strong>Topic:</strong> ${event.topic || 'General'}</div>
+            <div class="card-detail"><strong>Category:</strong> ${event.category || event.content_type || 'Unknown'}</div>
+        </div>
+    `).join('');
+}
+
+function getStatusColor(status) {
+    const colors = {
+        'ESTABLISHED': '#28a745',
+        'ONGOING': '#007bff', 
+        'ATTEMPTED': '#ffc107',
+        'DORMANT': '#6c757d'
+    };
+    return colors[status] || '#6c757d';
+}
+
+function showTreeTab(event, tabName) {
+    // Remove active class from all tab buttons
+    document.querySelectorAll('.tree-tab-btn').forEach(btn => btn.classList.remove('active'));
+    
+    // Remove active class from all tab contents
+    document.querySelectorAll('.tree-tab-content').forEach(content => content.classList.remove('active'));
+    
+    // Add active class to clicked button
+    event.target.classList.add('active');
+    
+    // Show selected tab content
+    const selectedContent = document.getElementById(tabName);
+    if (selectedContent) {
+        selectedContent.classList.add('active');
+    }
 }
 
 function formatIntelligenceResults(result) {
