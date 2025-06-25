@@ -55,6 +55,6 @@
     }
   },
   "scripts": {
-    "postdeploy": "python -c \"from storage.storage_manager_sync import initialize_storage_manager_sync; initialize_storage_manager_sync()\""
+    "postdeploy": "python init_db.py"
   }
 } 

@@ -60,9 +60,9 @@ git commit -m "Prepare for Heroku deployment"
 git push heroku main
 ```
 
-### 6. Initialize Database (if needed)
+### 6. Initialize Database
 ```bash
-heroku run python -c "from storage.storage_manager_sync import initialize_storage_manager_sync; initialize_storage_manager_sync()"
+heroku run python init_db.py
 ```
 
 ### 7. Open Your App
@@ -101,6 +101,9 @@ heroku pg:info
 
 # Connect to database (optional)
 heroku pg:psql
+
+# Initialize database schema
+heroku run python init_db.py
 ```
 
 ## Monitoring and Logs
@@ -155,6 +158,9 @@ heroku logs --tail
 ```bash
 heroku pg:info
 # Verify PostgreSQL addon is provisioned
+
+# Re-initialize database if needed
+heroku run python init_db.py
 ```
 
 **4. Build Failures**
@@ -162,7 +168,6 @@ heroku pg:info
 - Use `requirements-heroku.txt` if needed:
 ```bash
 # Use alternative requirements file
-echo "python-3.12.0" > runtime.txt
 cp requirements-heroku.txt requirements.txt
 git add . && git commit -m "Use Heroku-optimized requirements"
 git push heroku main
@@ -235,6 +240,9 @@ heroku pg:backups:download
 
 # Restore from backup
 heroku pg:backups:restore [backup-id]
+
+# Re-initialize database schema (if needed)
+heroku run python init_db.py
 ```
 
 ### Monitor Resource Usage
