@@ -4426,8 +4426,12 @@ function getStepPrerequisites(stepId) {
 }
 
 async function runIndividualStep(stepId) {
+    console.log('🔬 DEBUG: runIndividualStep called with stepId:', stepId);
+    
     // Check authentication first
     const isAuthenticated = await checkAuthentication();
+    console.log('🔬 DEBUG: Authentication check result:', isAuthenticated);
+    
     if (!isAuthenticated) {
         showMessage('Authentication required. Please log in to run pipeline operations.', 'error');
         return;
