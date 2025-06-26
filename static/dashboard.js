@@ -5783,6 +5783,9 @@ async function startFromStep(stepId, stepNumber) {
 }
 
 async function handleRunIndividualStep(stepId) {
+    console.log('🚨 DEBUG: handleRunIndividualStep called with:', stepId);
+    alert('🚨 DEBUG: handleRunIndividualStep called with: ' + stepId);
+    
     // Simple wrapper that calls the existing runIndividualStep function
     await runIndividualStep(stepId);
 }
