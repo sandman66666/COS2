@@ -96,8 +96,19 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     console.log('🔑 Login button clicked - starting Google OAuth...');
     
     try {
-      // Use the full URL to ensure proper redirect
-      const redirectUrl = `${window.location.protocol}//${window.location.hostname}:8080/auth/google`;
+      // Detect environment and construct proper OAuth URL
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      let redirectUrl;
+      if (isLocalhost) {
+        // Local development: use explicit port 8080
+        redirectUrl = `${window.location.protocol}//${window.location.hostname}:8080/auth/google`;
+      } else {
+        // Production (Heroku): use same domain without port
+        redirectUrl = `${window.location.protocol}//${window.location.host}/auth/google`;
+      }
+      
+      console.log('🔗 Environment detected:', isLocalhost ? 'localhost' : 'production');
       console.log('🔗 Redirecting to:', redirectUrl);
       
       // Direct redirect to backend OAuth endpoint
