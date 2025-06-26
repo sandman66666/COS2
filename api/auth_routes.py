@@ -157,14 +157,12 @@ async def google_callback():
                 try:
                     async with storage_manager.postgres.conn_pool.acquire() as conn:
                         user_id = await conn.fetchval("""
-                            INSERT INTO users (email, google_id, profile, settings, created_at, updated_at)
-                            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            INSERT INTO users (email, google_id, created_at)
+                            VALUES ($1, $2, CURRENT_TIMESTAMP)
                             RETURNING id
                         """, 
                         user_email, 
-                        user_google_id,
-                        {"name": user_info.get('name', ''), "picture": user_info.get('picture', '')},
-                        {}
+                        user_google_id
                         )
                         logger.info(f"Created new user in database: {user_email} with ID {user_id}")
                 except Exception as e:
