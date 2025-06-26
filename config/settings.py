@@ -105,3 +105,6 @@ ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
 
 # Heroku detection
 IS_HEROKU = bool(os.getenv('DYNO'))  # Heroku sets DYNO environment variable
+
+# Force domain for OAuth consistency (used in Heroku to maintain session state)
+FORCE_DOMAIN = os.getenv('FORCE_DOMAIN')
