@@ -1033,19 +1033,27 @@ def analyze_sent_emails():
                 # Save contacts to database
                 contacts_saved = 0
                 if contacts_dict:
+                    # Prepare contact list for bulk storage
+                    contact_list = []
                     for email_addr, contact_data in contacts_dict.items():
-                        try:
-                            result = storage_manager.save_contact_sync(
-                                user_id=user_id,
-                                email=email_addr,
-                                trust_tier=contact_data['trust_tier'],
-                                frequency=contact_data['frequency']
-                            )
-                            if result:
-                                contacts_saved += 1
-                        except Exception as save_error:
-                            logger.error(f"Error saving contact {email_addr}: {str(save_error)}")
-                            continue
+                        domain = email_addr.split('@')[1] if '@' in email_addr else ''
+                        contact_list.append({
+                            'email': email_addr,
+                            'name': '',  # Will be empty for now
+                            'frequency': contact_data['frequency'],
+                            'domain': domain,
+                            'trust_tier': contact_data['trust_tier'],
+                            'metadata': {}
+                        })
+                    
+                    try:
+                        # Use the correct bulk storage method
+                        storage_manager.postgres.store_contacts(user_id, contact_list)
+                        contacts_saved = len(contact_list)
+                        logger.info(f"Successfully saved {contacts_saved} contacts to database")
+                    except Exception as save_error:
+                        logger.error(f"Error saving contacts to database: {str(save_error)}")
+                        contacts_saved = 0
                 
                 # Final status update
                 with jobs_lock:
