@@ -12,6 +12,13 @@ import json
 from datetime import datetime
 from flask import Flask, request, session, render_template, jsonify
 from flask_cors import CORS
+import sys
+import asyncio
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from api.auth_routes import auth_bp
 from api.routes_sync import api_sync_bp
@@ -19,10 +26,10 @@ from api.logging_routes_sync import logging_bp
 from api.intelligence_routes_with_logging import intelligence_logging_bp
 # from api.alerts_routes_flask import alerts_bp  # Temporarily disabled - uses async routes
 # from routes.contacts import contacts_bp  # Removed - module doesn't exist
-from middleware.auth_middleware import get_current_user, require_auth
+from middleware.auth_middleware import get_current_user, require_auth, AuthMiddleware
 from storage.storage_manager_sync import initialize_storage_manager_sync
 from utils.logging import structured_logger as logger
-from config.settings import API_SECRET_KEY
+from config.settings import API_SECRET_KEY, API_DEBUG, API_HOST, API_PORT, IS_HEROKU, FORCE_DOMAIN
 
 def create_app():
     """Create and configure Flask app"""
@@ -30,7 +37,7 @@ def create_app():
     
     # Configure Flask
     app.config['SECRET_KEY'] = API_SECRET_KEY
-    app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+    app.config['SESSION_COOKIE_SECURE'] = not API_DEBUG  # Secure cookies in production
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours
     
@@ -54,6 +61,26 @@ def create_app():
     app.register_blueprint(api_sync_bp)  # Use sync API routes
     app.register_blueprint(logging_bp)  # Add logging analysis routes
     app.register_blueprint(intelligence_logging_bp)  # Add intelligence logging routes
+    
+    # Initialize authentication middleware
+    AuthMiddleware(app)
+    
+    # Domain redirect middleware for OAuth consistency
+    @app.before_request
+    def force_domain_redirect():
+        """Redirect short domain to full domain to maintain OAuth session consistency"""
+        if FORCE_DOMAIN and request.host != FORCE_DOMAIN:
+            # Only redirect if coming from a different domain
+            if request.url.startswith('http://'):
+                new_url = request.url.replace('http://', 'https://').replace(request.host, FORCE_DOMAIN)
+            else:
+                new_url = request.url.replace(request.host, FORCE_DOMAIN)
+            
+            logger.info("Redirecting for domain consistency", 
+                       from_host=request.host, to_host=FORCE_DOMAIN, url=new_url)
+            
+            from flask import redirect
+            return redirect(new_url, 301)
     
     # Main dashboard route
     @app.route('/')
