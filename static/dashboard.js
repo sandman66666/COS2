@@ -3544,7 +3544,23 @@ async function startFromSelectedStep() {
                                 limit: 100 
                             })
                         });
-                        return await response.json();
+                        
+                        if (response.status === 401) {
+                            throw new Error('Authentication required - please log in again');
+                        }
+                        
+                        const result = await response.json();
+                        
+                        // Check if this is a background job
+                        if (result.job_id && result.status_url) {
+                            console.log(`⏳ Background job started: ${result.job_id}`);
+                            showMessage(`⏳ Contact enrichment started in background...`, 'info');
+                            
+                            // Poll for job completion
+                            return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                        }
+                        
+                        return result;
                     });
                     break;
                     
