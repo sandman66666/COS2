@@ -4499,7 +4499,9 @@ async function runIndividualStep(stepId) {
                 break;
                 
             case 'augment':
+                console.log('🔬 DEBUG: Starting augment case in runIndividualStep');
                 result = await executeIndividualStep('augment', async () => {
+                    console.log('🔬 DEBUG: Inside augment executeIndividualStep function');
                     const response = await fetch('/api/intelligence/enrich-contacts', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -4509,11 +4511,14 @@ async function runIndividualStep(stepId) {
                         })
                     });
                     
+                    console.log('🔬 DEBUG: Got response from API, status:', response.status);
+                    
                     if (response.status === 401) {
                         throw new Error('Authentication required - please log in again');
                     }
                     
                     const result = await response.json();
+                    console.log('🔬 DEBUG: API response data:', result);
                     
                     // Check if this is a background job
                     if (result.job_id && result.status_url) {
@@ -4522,6 +4527,8 @@ async function runIndividualStep(stepId) {
                         
                         // Poll for job completion
                         return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                    } else {
+                        console.log('🔬 DEBUG: No job_id in response, treating as synchronous');
                     }
                     
                     return result;
