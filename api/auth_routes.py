@@ -36,24 +36,24 @@ def async_route(f):
         return asyncio.run(f(*args, **kwargs))
     return wrapper
 
-@auth_bp.route('/')
-def index():
-    """Main index route - redirects to home if authenticated"""
-    user = get_current_user()
-    if not user:
-        return redirect('/login')
-    
-    # Redirect to home page
-    return redirect(url_for('auth.home'))
+# @auth_bp.route('/')
+# def index():
+#     """Main index route - redirects to React dashboard if authenticated"""
+#     user = get_current_user()
+#     if not user:
+#         return redirect('/login')
+#     
+#     # Redirect to React dashboard instead of HTML dashboard
+#     return redirect('/react')
 
 @auth_bp.route('/home')
 @require_auth
 def home():
-    """Home page route - redirects to dashboard"""
+    """Home page route - redirects to React dashboard"""
     user = get_current_user()
     
-    # Redirect to dashboard instead of trying to render home.html
-    return redirect('/dashboard')
+    # Redirect to React dashboard instead of old HTML dashboard
+    return redirect('/react')
 
 @auth_bp.route('/auth/google')
 def google_auth():
