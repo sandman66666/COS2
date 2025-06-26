@@ -71,13 +71,12 @@ GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
 # Dynamic redirect URI based on environment
 force_domain = os.getenv('FORCE_DOMAIN')
 if force_domain:
-    # Use forced domain (typically the full Heroku domain)
+    # Use forced domain (the actual Heroku domain)
     GOOGLE_REDIRECT_URI = f"https://{force_domain}/auth/callback"
 elif os.getenv('HEROKU_APP_NAME'):
-    # Heroku environment - use full domain to avoid session issues
+    # Fallback for Heroku environment without FORCE_DOMAIN
     heroku_app_name = os.getenv('HEROKU_APP_NAME')
-    # Always use the full Heroku domain format to avoid OAuth session issues
-    GOOGLE_REDIRECT_URI = f"https://{heroku_app_name}-f4823db1f5e3.herokuapp.com/auth/callback"
+    GOOGLE_REDIRECT_URI = f"https://{heroku_app_name}.herokuapp.com/auth/callback"
 else:
     # Local development
     GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8080/auth/callback')
