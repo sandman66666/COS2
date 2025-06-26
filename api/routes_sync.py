@@ -901,16 +901,235 @@ def analyze_sent_emails():
                         background_jobs[job_id]['message'] = 'Connecting to Gmail API...'
                         background_jobs[job_id]['progress'] = 10
                 
-                # Get user credentials from database
-                conn = get_db_connection()
-                if not conn:
+                # Get user credentials from database using correct function
+                storage_manager = get_storage_manager_sync()
+                user = storage_manager.get_user_by_email(user_email)
+                if not user:
                     with jobs_lock:
                         if job_id in background_jobs:
                             background_jobs[job_id]['status'] = 'failed'
-                            background_jobs[job_id]['message'] = 'Database connection failed'
+                            background_jobs[job_id]['message'] = 'User not found in database'
                     return
                 
-                # ... rest of background processing logic will go here ...
+                user_id = user['id']
+                
+                # Get OAuth credentials from database
+                conn = storage_manager.postgres.conn_pool.getconn()
+                try:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT credentials FROM oauth_credentials WHERE user_id = %s AND provider = 'google'",
+                            (user_id,)
+                        )
+                        result = cursor.fetchone()
+                        
+                        if not result:
+                            with jobs_lock:
+                                if job_id in background_jobs:
+                                    background_jobs[job_id]['status'] = 'failed'
+                                    background_jobs[job_id]['message'] = 'No Gmail credentials found'
+                            return
+                        
+                        oauth_credentials = result[0]
+                finally:
+                    storage_manager.postgres.conn_pool.putconn(conn)
+                
+                # Update status to fetching
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'fetching'
+                        background_jobs[job_id]['message'] = 'Fetching sent emails from Gmail...'
+                        background_jobs[job_id]['progress'] = 20
+                
+                # Build Gmail service
+                credentials = Credentials(
+                    token=oauth_credentials['access_token'],
+                    refresh_token=oauth_credentials.get('refresh_token'),
+                    token_uri='https://oauth2.googleapis.com/token',
+                    client_id=oauth_credentials.get('client_id'),
+                    client_secret=oauth_credentials.get('client_secret')
+                )
+                
+                gmail_service = build('gmail', 'v1', credentials=credentials)
+                
+                # Calculate date range
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+                query = f'in:sent after:{cutoff_date.strftime("%Y/%m/%d")}'
+                
+                # Get sent emails
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['message'] = 'Retrieving sent email list...'
+                        background_jobs[job_id]['progress'] = 30
+                
+                # Get list of sent emails
+                messages = []
+                next_page_token = None
+                
+                while True:
+                    try:
+                        if next_page_token:
+                            results = gmail_service.users().messages().list(
+                                userId='me', q=query, pageToken=next_page_token, maxResults=500
+                            ).execute()
+                        else:
+                            results = gmail_service.users().messages().list(
+                                userId='me', q=query, maxResults=500
+                            ).execute()
+                        
+                        if 'messages' in results:
+                            messages.extend(results['messages'])
+                        
+                        next_page_token = results.get('nextPageToken')
+                        if not next_page_token:
+                            break
+                            
+                        # Rate limiting
+                        time.sleep(0.1)
+                        
+                    except Exception as e:
+                        logger.error(f"Error fetching email list: {e}")
+                        break
+                
+                logger.info(f"Found {len(messages)} sent emails to analyze")
+                
+                if not messages:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'completed'
+                            background_jobs[job_id]['message'] = 'No sent emails found in the specified time range'
+                            background_jobs[job_id]['progress'] = 100
+                            background_jobs[job_id]['end_time'] = datetime.now(timezone.utc).isoformat()
+                            background_jobs[job_id]['stats'] = {
+                                'total_emails': 0,
+                                'contacts_found': 0,
+                                'processing_time_seconds': 0
+                            }
+                    return
+                
+                # Process emails and extract contacts
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'processing'
+                        background_jobs[job_id]['message'] = 'Analyzing sent emails for contacts...'
+                        background_jobs[job_id]['progress'] = 40
+                
+                contacts_dict = {}
+                processed_count = 0
+                start_time = time.time()
+                
+                for i, message in enumerate(messages):
+                    try:
+                        # Get the full message
+                        msg = gmail_service.users().messages().get(
+                            userId='me', id=message['id'], format='full'
+                        ).execute()
+                        
+                        # Extract headers
+                        headers = msg.get('payload', {}).get('headers', [])
+                        to_addresses = []
+                        cc_addresses = []
+                        bcc_addresses = []
+                        subject = ''
+                        
+                        for header in headers:
+                            name = header.get('name', '').lower()
+                            value = header.get('value', '')
+                            
+                            if name == 'to':
+                                to_addresses = re.findall(r'[\w\.-]+@[\w\.-]+', value)
+                            elif name == 'cc':
+                                cc_addresses = re.findall(r'[\w\.-]+@[\w\.-]+', value)
+                            elif name == 'bcc':
+                                bcc_addresses = re.findall(r'[\w\.-]+@[\w\.-]+', value)
+                            elif name == 'subject':
+                                subject = value
+                        
+                        # Combine all recipient addresses
+                        all_recipients = to_addresses + cc_addresses + bcc_addresses
+                        
+                        # Process each recipient
+                        for email_addr in all_recipients:
+                            email_addr = email_addr.lower().strip()
+                            
+                            # Skip invalid emails and user's own email
+                            if not email_addr or email_addr == user_email.lower():
+                                continue
+                            
+                            if email_addr not in contacts_dict:
+                                # Determine trust tier based on domain
+                                domain = email_addr.split('@')[1] if '@' in email_addr else ''
+                                trust_tier = 3  # Default: acquaintance
+                                
+                                # Professional domains get higher trust
+                                professional_domains = [
+                                    'gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com',
+                                    'company.com', 'venture.com', 'capital.com', 'group.com'
+                                ]
+                                
+                                if any(prof_domain in domain for prof_domain in professional_domains):
+                                    trust_tier = 2  # Professional
+                                
+                                contacts_dict[email_addr] = {
+                                    'email': email_addr,
+                                    'name': email_addr.split('@')[0].replace('.', ' ').title(),
+                                    'frequency': 1,
+                                    'trust_tier': trust_tier,
+                                    'domain': domain,
+                                    'last_contact': datetime.now(timezone.utc).isoformat(),
+                                    'source': 'gmail_sent_analysis',
+                                    'user_id': user_id
+                                }
+                            else:
+                                contacts_dict[email_addr]['frequency'] += 1
+                        
+                        processed_count += 1
+                        
+                        # Update progress every 10 emails
+                        if processed_count % 10 == 0:
+                            progress = 40 + int((processed_count / len(messages)) * 50)
+                            with jobs_lock:
+                                if job_id in background_jobs:
+                                    background_jobs[job_id]['progress'] = min(progress, 90)
+                                    background_jobs[job_id]['message'] = f'Processed {processed_count}/{len(messages)} emails, found {len(contacts_dict)} contacts'
+                        
+                        # Rate limiting
+                        time.sleep(0.1)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing email {message['id']}: {e}")
+                        continue
+                
+                # Store contacts in database
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['message'] = 'Saving contacts to database...'
+                        background_jobs[job_id]['progress'] = 95
+                
+                if contacts_dict:
+                    contact_list = list(contacts_dict.values())
+                    try:
+                        storage_manager.postgres.store_contacts(user_id, contact_list)
+                        logger.info(f"Stored {len(contact_list)} contacts for user {user_email}")
+                    except Exception as e:
+                        logger.error(f"Error storing contacts: {e}")
+                
+                # Complete the job
+                processing_time = time.time() - start_time
+                
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'completed'
+                        background_jobs[job_id]['progress'] = 100
+                        background_jobs[job_id]['message'] = f'Analysis complete! Found {len(contacts_dict)} contacts from {processed_count} emails'
+                        background_jobs[job_id]['end_time'] = datetime.now(timezone.utc).isoformat()
+                        background_jobs[job_id]['stats'] = {
+                            'total_emails': processed_count,
+                            'contacts_found': len(contacts_dict),
+                            'processing_time_seconds': round(processing_time, 2)
+                        }
+                
+                logger.info(f"Background Gmail analysis completed for {user_email}: {len(contacts_dict)} contacts from {processed_count} emails")
                 
             except Exception as e:
                 logger.error(f"Background job {job_id} failed: {e}")
@@ -1957,11 +2176,12 @@ def sync_emails_internal(user_email: str, oauth_credentials: Dict, days: int = 3
                                                 break
                                             except:
                                                 pass
-                                elif 'body' in payload and 'data' in payload['body'] and payload.get('mimeType') == 'text/plain':
-                                    try:
-                                        body_text = base64.urlsafe_b64decode(payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                                    except:
-                                        pass
+                                elif 'body' in payload and 'data' in payload['body']:
+                                    if payload.get('mimeType') == 'text/plain':
+                                        try:
+                                            body_text = base64.urlsafe_b64decode(payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                        except:
+                                            pass
                             
                             # Store email
                             metadata = {
