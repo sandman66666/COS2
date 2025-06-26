@@ -137,6 +137,46 @@ async def google_callback():
             logger.error("No email received from OAuth")
             return redirect('/login' + '?error=no_email')
         
+        # Create or get user in database to ensure sync routes work
+        try:
+            storage_manager = await get_storage_manager()
+            
+            # Check if user exists in database
+            existing_user = None
+            try:
+                async with storage_manager.postgres.conn_pool.acquire() as conn:
+                    existing_user = await conn.fetchrow(
+                        "SELECT id, email, google_id FROM users WHERE email = $1", 
+                        user_email
+                    )
+            except Exception as e:
+                logger.warning(f"Could not check for existing user: {e}")
+            
+            # Create user if they don't exist
+            if not existing_user:
+                try:
+                    async with storage_manager.postgres.conn_pool.acquire() as conn:
+                        user_id = await conn.fetchval("""
+                            INSERT INTO users (email, google_id, profile, settings, created_at, updated_at)
+                            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            RETURNING id
+                        """, 
+                        user_email, 
+                        user_google_id,
+                        {"name": user_info.get('name', ''), "picture": user_info.get('picture', '')},
+                        {}
+                        )
+                        logger.info(f"Created new user in database: {user_email} with ID {user_id}")
+                except Exception as e:
+                    logger.error(f"Failed to create user in database: {e}")
+                    # Continue anyway - the session will work even if DB creation fails
+            else:
+                logger.info(f"User already exists in database: {user_email} with ID {existing_user['id']}")
+        
+        except Exception as e:
+            logger.error(f"Database operations failed during user creation: {e}")
+            # Continue anyway - the session auth will still work
+        
         # Clear session AFTER validation and create new authenticated session
         session.clear()
         
