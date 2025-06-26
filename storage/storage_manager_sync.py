@@ -98,6 +98,17 @@ class StorageManagerSync:
             logger.error(f"Store trusted contacts error: {error_msg}")
             return {'success': False, 'error': error_msg}
     
+    def save_contact_sync(self, user_id: int, contact: Dict) -> bool:
+        """Save a single contact (compatibility method)"""
+        try:
+            # Convert single contact to list format for bulk storage
+            contacts = [contact]
+            result = self.store_trusted_contacts(user_id, contacts)
+            return result.get('success', False)
+        except Exception as e:
+            logger.error(f"Save contact sync error: {str(e)}")
+            return False
+    
     def get_contacts(self, user_id: int, trust_tier: str = None, domain: str = None, 
                     limit: int = 100, offset: int = 0) -> Tuple[List[Dict], int]:
         """Get contacts for user"""

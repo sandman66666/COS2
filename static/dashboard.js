@@ -5751,22 +5751,90 @@ function downloadAllResults() {
 }
 
 function resetPipeline() {
-    // Reset the pipeline state to run again
+    // Reset all pipeline state
     currentPipelineState = {
         isRunning: false,
         currentStep: 0,
-        totalSteps: 0,
-        stepResults: {},
-        finalKnowledgeTree: null,
-        daysBack: 30
+        stepResults: {}
     };
     
-    document.getElementById('progressSection').style.display = 'none';
-    document.getElementById('resultsSection').style.display = 'none';
-    document.getElementById('startPipeline').disabled = false;
-    updateStartFromButtonStates();
+    // Reset UI
+    PIPELINE_STEPS.forEach(step => {
+        updateStepControlStatus(step.id, 'ready', 'Ready');
+        hideStepProgress(step.id);
+    });
     
-    showMessage('🔄 Pipeline reset - ready to run again', 'info');
+    updateProgressDisplay();
+    showMessage('Pipeline state reset', 'info');
+}
+
+// Background job polling function
+async function pollJobStatus(jobId, statusUrl, stepId) {
+    console.log(`🔍 Polling status for job ${jobId}`);
+    
+    const maxPolls = 120; // 10 minutes max (every 5 seconds)
+    let pollCount = 0;
+    
+    while (pollCount < maxPolls) {
+        try {
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+            
+            const statusResponse = await fetch(statusUrl);
+            if (!statusResponse.ok) {
+                throw new Error(`Failed to check job status: ${statusResponse.status}`);
+            }
+            
+            const jobStatus = await statusResponse.json();
+            console.log(`📊 Job ${jobId} status:`, jobStatus);
+            
+            // Update step progress if available
+            if (jobStatus.progress !== undefined) {
+                updateStepProgress(stepId, jobStatus.progress);
+            }
+            
+            // Update step message if available
+            if (jobStatus.message) {
+                updateStepControlStatus(stepId, 'running', jobStatus.message);
+            }
+            
+            // Check if job is complete
+            if (jobStatus.status === 'completed') {
+                console.log(`✅ Job ${jobId} completed successfully`);
+                
+                // Return structured result for the step
+                return {
+                    success: true,
+                    message: jobStatus.message || 'Contact enrichment completed',
+                    job_id: jobId,
+                    stats: {
+                        contacts_processed: jobStatus.contacts_processed || 0,
+                        successfully_enriched: jobStatus.contacts_enriched || 0,
+                        success_rate: jobStatus.success_rate || 0,
+                        sources_used: jobStatus.sources_used || 0
+                    },
+                    mode: 'background_job'
+                };
+            }
+            
+            // Check if job failed
+            if (jobStatus.status === 'failed') {
+                console.error(`❌ Job ${jobId} failed:`, jobStatus.message);
+                throw new Error(jobStatus.message || 'Background job failed');
+            }
+            
+            pollCount++;
+            
+        } catch (error) {
+            console.error(`Error polling job status:`, error);
+            if (pollCount > 5) { // Give it a few retries before giving up
+                throw error;
+            }
+            pollCount++;
+        }
+    }
+    
+    // Timeout
+    throw new Error(`Job ${jobId} timed out after ${maxPolls * 5} seconds`);
 }
 
 // Initialize the dashboard when the page loads
