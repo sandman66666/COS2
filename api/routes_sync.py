@@ -2509,4 +2509,37 @@ def strategic_intelligence_page():
     """Strategic Intelligence Dashboard page"""
     return render_template('strategic_intelligence.html')
 
+@api_sync_bp.route('/email/extract-sent', methods=['POST'])
+@require_auth
+def extract_sent_emails():
+    """Extract contacts from sent emails - alias for analyze-sent"""
+    try:
+        user_email = session.get('user_id', 'test@session-42.com')
+        oauth_credentials = session.get('oauth_credentials')
+        
+        request_data = request.get_json() or {}
+        lookback_days = request_data.get('lookback_days', 365)
+        limit = request_data.get('limit', 50)
+        
+        if not oauth_credentials:
+            return jsonify({
+                'success': False,
+                'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
+                'action_required': 'reauth',
+                'mode': 'synchronous'
+            }), 401
+        
+        # Use the internal function for contact extraction
+        result = analyze_sent_emails_internal(user_email, oauth_credentials, lookback_days, limit)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Contact extraction error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'mode': 'synchronous'
+        }), 500
+
 # ===== UTILITY FUNCTIONS =====
