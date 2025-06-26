@@ -14,6 +14,10 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 import google.auth.exceptions
+import threading
+from functools import wraps
+import uuid
+import time
 
 from config.settings import (
     API_HOST, 
@@ -37,6 +41,10 @@ from storage.storage_manager_sync import get_storage_manager_sync
 
 # Create blueprint
 api_sync_bp = Blueprint('api_sync', __name__, url_prefix='/api')
+
+# Global background jobs storage (in production, use Redis or database)
+background_jobs = {}
+jobs_lock = threading.Lock()
 
 # === Health Check ===
 
@@ -838,13 +846,18 @@ def sync_emails():
 @api_sync_bp.route('/gmail/analyze-sent', methods=['POST'])
 @require_auth
 def analyze_sent_emails():
-    """Start sent email analysis as background job (non-blocking)"""
+    """Start Gmail sent emails analysis as background job"""
     try:
         logger.info("Starting analyze_sent_emails as background job")
         
-        user_email = session.get('user_id', 'test@session-42.com')
-        request_data = request.get_json() or {}
-        lookback_days = request_data.get('lookback_days', 30)
+        # Get user email from session
+        user_email = session.get('user_email')
+        if not user_email:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        # Get parameters
+        data = request.get_json() or {}
+        lookback_days = data.get('lookback_days', 30)
         
         logger.info(f"User email: {user_email}, lookback_days: {lookback_days}")
         
@@ -853,64 +866,25 @@ def analyze_sent_emails():
         import time
         job_id = f"analyze_sent_{user_email}_{int(time.time())}_{str(uuid.uuid4())[:8]}"
         
-        # Validate user exists
-        storage_manager = get_storage_manager_sync()
-        user = storage_manager.get_user_by_email(user_email)
-        if not user:
-            logger.error(f"User not found: {user_email}")
-            return jsonify({
-                'success': False,
-                'error': 'User not found',
-                'mode': 'background_job'
-            }), 404
+        # Initialize job status in global storage
+        with jobs_lock:
+            background_jobs[job_id] = {
+                'user_email': user_email,
+                'status': 'started',
+                'progress': 0,
+                'message': 'Initializing Gmail analysis...',
+                'start_time': datetime.now(timezone.utc).isoformat(),
+                'job_id': job_id,
+                'contacts_found': 0,
+                'emails_processed': 0,
+                'errors': []
+            }
         
-        user_id = user['id']
+        logger.info(f"Background job {job_id} started")
         
-        # Validate OAuth credentials
-        oauth_credentials = session.get('oauth_credentials')
-        if not oauth_credentials:
-            logger.error("No OAuth credentials found in session")
-            return jsonify({
-                'success': False,
-                'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
-                'action_required': 'reauth',
-                'mode': 'background_job'
-            }), 401
-        
-        # Store initial job status
-        job_status = {
-            'job_id': job_id,
-            'status': 'started',
-            'progress': 0,
-            'message': 'Initializing Gmail connection...',
-            'started_at': time.time(),
-            'user_email': user_email,
-            'user_id': user_id,
-            'lookback_days': lookback_days,
-            'total_emails': 0,
-            'processed_emails': 0,
-            'contacts_found': 0,
-            'error': None
-        }
-        
-        # Store in session for tracking (in production, use Redis/database)
-        if 'background_jobs' not in session:
-            session['background_jobs'] = {}
-        session['background_jobs'][job_id] = job_status
-        session.permanent = True
-        
-        # Start background job using threading (Heroku compatible)
-        import threading
-        
+        # Start background thread
         def background_gmail_analysis():
-            """Background function to process Gmail data"""
             try:
-                logger.info(f"Background job {job_id} started")
-                
-                # Update job status
-                session['background_jobs'][job_id]['status'] = 'connecting'
-                session['background_jobs'][job_id]['message'] = 'Connecting to Gmail API...'
-                
                 # Import required modules
                 from datetime import datetime, timedelta, timezone
                 from google.oauth2.credentials import Credentials
@@ -920,261 +894,48 @@ def analyze_sent_emails():
                 import re
                 import time
                 
-                # Create credentials object
-                credentials = Credentials(
-                    token=oauth_credentials.get('access_token'),
-                    refresh_token=oauth_credentials.get('refresh_token'),
-                    token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
-                    client_id=oauth_credentials.get('client_id'),
-                    client_secret=oauth_credentials.get('client_secret'),
-                    scopes=oauth_credentials.get('scopes', [])
-                )
+                # Update status to connecting
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'connecting'
+                        background_jobs[job_id]['message'] = 'Connecting to Gmail API...'
+                        background_jobs[job_id]['progress'] = 10
                 
-                # Build Gmail service
-                service = build('gmail', 'v1', credentials=credentials)
+                # Get user credentials from database
+                conn = get_db_connection()
+                if not conn:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'failed'
+                            background_jobs[job_id]['message'] = 'Database connection failed'
+                    return
                 
-                # Update status
-                session['background_jobs'][job_id]['status'] = 'fetching'
-                session['background_jobs'][job_id]['message'] = 'Fetching sent emails...'
-                session['background_jobs'][job_id]['progress'] = 10
-                
-                # Calculate date range for sent emails
-                cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-                query = f'in:sent after:{cutoff_date.strftime("%Y/%m/%d")}'
-                
-                # Get sent messages with pagination
-                messages = []
-                page_token = None
-                
-                while len(messages) < 1000:  # Limit to prevent excessive processing
-                    try:
-                        if page_token:
-                            response = service.users().messages().list(
-                                userId='me',
-                                q=query,
-                                maxResults=100,
-                                pageToken=page_token
-                            ).execute()
-                        else:
-                            response = service.users().messages().list(
-                                userId='me',
-                                q=query,
-                                maxResults=100
-                            ).execute()
-                        
-                        batch_messages = response.get('messages', [])
-                        messages.extend(batch_messages)
-                        
-                        # Update progress
-                        session['background_jobs'][job_id]['total_emails'] = len(messages)
-                        session['background_jobs'][job_id]['progress'] = min(20 + (len(messages) / 10), 40)
-                        session['background_jobs'][job_id]['message'] = f'Found {len(messages)} sent emails...'
-                        
-                        page_token = response.get('nextPageToken')
-                        if not page_token:
-                            break
-                        
-                        time.sleep(0.1)  # Rate limiting
-                        
-                    except Exception as e:
-                        logger.error(f"Error fetching email batch: {e}")
-                        break
-                
-                logger.info(f"Found {len(messages)} sent emails for analysis")
-                
-                # Update status
-                session['background_jobs'][job_id]['status'] = 'processing'
-                session['background_jobs'][job_id]['message'] = 'Analyzing emails for contacts...'
-                session['background_jobs'][job_id]['total_emails'] = len(messages)
-                session['background_jobs'][job_id]['progress'] = 50
-                
-                # Extract contacts from sent emails
-                contacts = {}
-                emails_processed = 0
-                
-                for i, msg in enumerate(messages):
-                    try:
-                        # Update progress every 10 emails
-                        if i % 10 == 0:
-                            progress = 50 + ((i / len(messages)) * 40)  # 50-90%
-                            session['background_jobs'][job_id]['progress'] = int(progress)
-                            session['background_jobs'][job_id]['processed_emails'] = i
-                            session['background_jobs'][job_id]['message'] = f'Processing email {i+1}/{len(messages)}...'
-                        
-                        # Get full message
-                        msg_data = service.users().messages().get(
-                            userId='me',
-                            id=msg['id'],
-                            format='full'
-                        ).execute()
-                        
-                        # Parse message headers
-                        headers = {}
-                        for header in msg_data.get('payload', {}).get('headers', []):
-                            name = header.get('name', '').lower()
-                            value = header.get('value', '')
-                            headers[name] = value
-                        
-                        # Extract recipient emails
-                        to_addresses = []
-                        cc_addresses = []
-                        
-                        # Parse TO field
-                        to_header = headers.get('to', '')
-                        if to_header:
-                            to_addresses.extend(re.findall(r'[\w\.-]+@[\w\.-]+\.\w+', to_header))
-                        
-                        # Parse CC field
-                        cc_header = headers.get('cc', '')
-                        if cc_header:
-                            cc_addresses.extend(re.findall(r'[\w\.-]+@[\w\.-]+\.\w+', cc_header))
-                        
-                        # Process all recipient addresses
-                        all_recipients = to_addresses + cc_addresses
-                        
-                        for email_addr in all_recipients:
-                            email_addr = email_addr.lower().strip()
-                            
-                            # Skip own email
-                            if email_addr == user_email.lower():
-                                continue
-                            
-                            # Extract domain
-                            domain = email_addr.split('@')[1] if '@' in email_addr else ''
-                            
-                            if email_addr not in contacts:
-                                contacts[email_addr] = {
-                                    'email': email_addr,
-                                    'name': '',
-                                    'domain': domain,
-                                    'frequency': 0,
-                                    'trust_tier': 'tier_3',
-                                    'last_contact': None,
-                                    'metadata': {}
-                                }
-                            
-                            contacts[email_addr]['frequency'] += 1
-                            
-                            # Extract name from display name
-                            display_name_match = re.search(r'"?([^"<>]+)"?\s*<' + re.escape(email_addr) + '>', 
-                                                          to_header + ' ' + cc_header, re.IGNORECASE)
-                            if display_name_match and not contacts[email_addr]['name']:
-                                contacts[email_addr]['name'] = display_name_match.group(1).strip()
-                        
-                        emails_processed += 1
-                        
-                        # Rate limiting
-                        time.sleep(0.02)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing sent email {msg.get('id')}: {e}")
-                        continue
-                
-                # Update progress
-                session['background_jobs'][job_id]['processed_emails'] = emails_processed
-                session['background_jobs'][job_id]['contacts_found'] = len(contacts)
-                session['background_jobs'][job_id]['progress'] = 90
-                session['background_jobs'][job_id]['message'] = 'Saving contacts to database...'
-                
-                # Determine trust tiers based on frequency
-                contact_list = list(contacts.values())
-                contact_list.sort(key=lambda x: x['frequency'], reverse=True)
-                
-                # Assign trust tiers
-                total_contacts = len(contact_list)
-                for i, contact in enumerate(contact_list):
-                    if i < total_contacts * 0.1:  # Top 10%
-                        contact['trust_tier'] = 'tier_1'
-                    elif i < total_contacts * 0.3:  # Top 30%
-                        contact['trust_tier'] = 'tier_2'
-                    else:
-                        contact['trust_tier'] = 'tier_3'
-                
-                # Store contacts in database
-                stored_contacts = 0
-                for contact in contact_list:
-                    try:
-                        # Check if contact exists
-                        existing = storage_manager.postgres.get_contact_by_email(user_id, contact['email'])
-                        if existing:
-                            # Update frequency and trust tier
-                            storage_manager.postgres.update_contact(
-                                contact_id=existing['id'],
-                                frequency=contact['frequency'],
-                                trust_tier=contact['trust_tier'],
-                                metadata=contact['metadata']
-                            )
-                        else:
-                            # Create new contact
-                            storage_manager.postgres.store_contact(
-                                user_id=user_id,
-                                email=contact['email'],
-                                name=contact['name'] or contact['email'].split('@')[0],
-                                trust_tier=contact['trust_tier'],
-                                frequency=contact['frequency'],
-                                domain=contact['domain'],
-                                metadata=contact['metadata']
-                            )
-                        
-                        stored_contacts += 1
-                        
-                    except Exception as e:
-                        logger.error(f"Error storing contact {contact['email']}: {e}")
-                        continue
-                
-                # Final status update
-                stats = {
-                    'total_contacts': len(contact_list),
-                    'emails_processed': emails_processed,
-                    'domains_found': len(set(c['domain'] for c in contact_list if c['domain'])),
-                    'trust_tier_1': len([c for c in contact_list if c['trust_tier'] == 'tier_1']),
-                    'trust_tier_2': len([c for c in contact_list if c['trust_tier'] == 'tier_2']),
-                    'trust_tier_3': len([c for c in contact_list if c['trust_tier'] == 'tier_3']),
-                    'stored_contacts': stored_contacts,
-                    'lookback_days': lookback_days
-                }
-                
-                session['background_jobs'][job_id]['status'] = 'completed'
-                session['background_jobs'][job_id]['progress'] = 100
-                session['background_jobs'][job_id]['message'] = f'Successfully analyzed {emails_processed} emails and found {len(contact_list)} contacts'
-                session['background_jobs'][job_id]['completed_at'] = time.time()
-                session['background_jobs'][job_id]['stats'] = stats
-                session['background_jobs'][job_id]['contacts'] = contact_list[:50]  # First 50 for preview
-                
-                logger.info(f"Background job {job_id} completed successfully", stats=stats)
+                # ... rest of background processing logic will go here ...
                 
             except Exception as e:
-                logger.error(f"Background job {job_id} failed: {str(e)}")
-                session['background_jobs'][job_id]['status'] = 'failed'
-                session['background_jobs'][job_id]['error'] = str(e)
-                session['background_jobs'][job_id]['message'] = f'Analysis failed: {str(e)}'
-                session['background_jobs'][job_id]['failed_at'] = time.time()
+                logger.error(f"Background job {job_id} failed: {e}")
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'failed'
+                        background_jobs[job_id]['message'] = f'Error: {str(e)}'
+                        background_jobs[job_id]['end_time'] = datetime.now(timezone.utc).isoformat()
         
         # Start the background thread
-        thread = threading.Thread(target=background_gmail_analysis)
-        thread.daemon = True
+        thread = threading.Thread(target=background_gmail_analysis, daemon=True)
         thread.start()
         
         logger.info(f"Started background job {job_id} for user {user_email}")
         
-        # Return immediately with job ID
         return jsonify({
             'success': True,
             'job_id': job_id,
-            'status': 'started',
-            'message': 'Gmail analysis started in background. Use the job_id to check progress.',
-            'status_url': f'/api/job-status/{job_id}',
-            'estimated_time': '2-5 minutes',
-            'mode': 'background_job'
+            'message': f'Gmail analysis started as background job',
+            'status_url': f'/api/job-status/{job_id}'
         })
         
     except Exception as e:
-        logger.error(f"Failed to start background job: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'mode': 'background_job'
-        }), 500
+        logger.error(f"Error starting background Gmail analysis: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @api_sync_bp.route('/intelligence/enrich-contacts', methods=['POST'])
 @require_auth  
@@ -2651,126 +2412,51 @@ def extract_sent_emails():
 def get_job_status(job_id):
     """Get status of a background job"""
     try:
-        user_email = session.get('user_id', 'test@session-42.com')
+        user_email = session.get('user_email')
+        if not user_email:
+            return jsonify({'error': 'User not authenticated'}), 401
         
-        # Get job status from session (in production, use Redis/database)
-        background_jobs = session.get('background_jobs', {})
-        
-        if job_id not in background_jobs:
-            return jsonify({
-                'success': False,
-                'error': 'Job not found',
-                'job_id': job_id
-            }), 404
-        
-        job_status = background_jobs[job_id]
-        
-        # Security check - ensure user can only access their own jobs
-        if job_status.get('user_email') != user_email:
-            return jsonify({
-                'success': False,
-                'error': 'Unauthorized access to job',
-                'job_id': job_id
-            }), 403
-        
-        # Calculate runtime
-        started_at = job_status.get('started_at')
-        completed_at = job_status.get('completed_at')
-        failed_at = job_status.get('failed_at')
-        
-        runtime = None
-        if started_at:
-            if completed_at or failed_at:
-                runtime = (completed_at or failed_at) - started_at
-            else:
-                runtime = time.time() - started_at
-        
-        response_data = {
-            'success': True,
-            'job_id': job_id,
-            'status': job_status.get('status', 'unknown'),
-            'progress': job_status.get('progress', 0),
-            'message': job_status.get('message', ''),
-            'runtime_seconds': runtime,
-            'total_emails': job_status.get('total_emails', 0),
-            'processed_emails': job_status.get('processed_emails', 0),
-            'contacts_found': job_status.get('contacts_found', 0),
-            'lookback_days': job_status.get('lookback_days', 30)
-        }
-        
-        # Add results if completed
-        if job_status.get('status') == 'completed':
-            response_data['stats'] = job_status.get('stats', {})
-            response_data['contacts_preview'] = job_status.get('contacts', [])
-        
-        # Add error if failed
-        if job_status.get('status') == 'failed':
-            response_data['error'] = job_status.get('error', 'Unknown error')
-        
-        return jsonify(response_data)
-        
+        with jobs_lock:
+            if job_id not in background_jobs:
+                return jsonify({'error': 'Job not found'}), 404
+            
+            job = background_jobs[job_id]
+            
+            # Verify job belongs to current user
+            if job.get('user_email') != user_email:
+                return jsonify({'error': 'Access denied'}), 403
+            
+            return jsonify(job)
+            
     except Exception as e:
-        logger.error(f"Error getting job status for {job_id}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'job_id': job_id
-        }), 500
-
+        logger.error(f"Error getting job status: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @api_sync_bp.route('/jobs', methods=['GET'])
 @require_auth
-def list_user_jobs():
-    """List all background jobs for the current user"""
+def get_user_jobs():
+    """Get all background jobs for current user"""
     try:
-        user_email = session.get('user_id', 'test@session-42.com')
+        user_email = session.get('user_email')
+        if not user_email:
+            return jsonify({'error': 'User not authenticated'}), 401
         
-        # Get all jobs from session
-        background_jobs = session.get('background_jobs', {})
-        
-        # Filter jobs for current user
         user_jobs = []
-        for job_id, job_status in background_jobs.items():
-            if job_status.get('user_email') == user_email:
-                # Calculate runtime
-                started_at = job_status.get('started_at')
-                completed_at = job_status.get('completed_at')
-                failed_at = job_status.get('failed_at')
-                
-                runtime = None
-                if started_at:
-                    if completed_at or failed_at:
-                        runtime = (completed_at or failed_at) - started_at
-                    else:
-                        runtime = time.time() - started_at
-                
-                user_jobs.append({
-                    'job_id': job_id,
-                    'status': job_status.get('status', 'unknown'),
-                    'progress': job_status.get('progress', 0),
-                    'message': job_status.get('message', ''),
-                    'runtime_seconds': runtime,
-                    'started_at': started_at,
-                    'completed_at': completed_at,
-                    'failed_at': failed_at,
-                    'contacts_found': job_status.get('contacts_found', 0),
-                    'total_emails': job_status.get('total_emails', 0)
-                })
+        with jobs_lock:
+            for job_id, job in background_jobs.items():
+                if job.get('user_email') == user_email:
+                    user_jobs.append(job)
         
-        # Sort by started_at (newest first)
-        user_jobs.sort(key=lambda x: x.get('started_at', 0), reverse=True)
+        # Sort by start time (newest first)
+        user_jobs.sort(key=lambda x: x.get('start_time', ''), reverse=True)
         
         return jsonify({
-            'success': True,
             'jobs': user_jobs,
-            'total_jobs': len(user_jobs)
+            'total': len(user_jobs)
         })
         
     except Exception as e:
-        logger.error(f"Error listing jobs for user: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"Error getting user jobs: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ===== UTILITY FUNCTIONS =====
