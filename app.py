@@ -163,6 +163,42 @@ def create_app():
             'status_code': 500
         }), 500
     
+    # React static file routes
+    @app.route('/static/css/<path:filename>')
+    def react_css(filename):
+        """Serve React CSS files"""
+        return send_from_directory('static/react/static/css', filename)
+    
+    @app.route('/static/js/<path:filename>')
+    def react_js(filename):
+        """Serve React JS files"""
+        return send_from_directory('static/react/static/js', filename)
+    
+    @app.route('/manifest.json')
+    def react_manifest():
+        """Serve React manifest.json"""
+        return send_from_directory('static/react', 'manifest.json')
+    
+    @app.route('/favicon.ico')
+    def react_favicon():
+        """Serve React favicon"""
+        return send_from_directory('static/react', 'favicon.ico')
+    
+    @app.route('/robots.txt')
+    def react_robots():
+        """Serve React robots.txt"""
+        return send_from_directory('static/react', 'robots.txt')
+    
+    @app.route('/logo192.png')
+    def react_logo192():
+        """Serve React logo192.png"""
+        return send_from_directory('static/react', 'logo192.png')
+    
+    @app.route('/logo512.png')
+    def react_logo512():
+        """Serve React logo512.png"""
+        return send_from_directory('static/react', 'logo512.png')
+    
     return app
 
 # Create the app
