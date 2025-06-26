@@ -1168,215 +1168,269 @@ def analyze_sent_emails():
 @api_sync_bp.route('/intelligence/enrich-contacts', methods=['POST'])
 @require_auth  
 def enrich_contacts():
-    """Contact enrichment with advanced web intelligence (synchronous)"""
+    """Contact enrichment with advanced web intelligence (synchronous background job)"""
     try:
         user_email = session.get('user_id', 'test@session-42.com')
         request_data = request.get_json() or {}
         limit = request_data.get('limit', 50)
         
-        storage_manager = get_storage_manager_sync()
-        user = storage_manager.get_user_by_email(user_email)
-        if not user:
-            return jsonify({
-                'success': False,
-                'error': 'User not found',
-                'mode': 'synchronous'
-            }), 404
+        logger.info(f"Starting contact enrichment as background job for user {user_email}")
         
-        user_id = user['id']
+        # Generate unique job ID
+        import uuid
+        import time
+        job_id = f"enrich_contacts_{user_email}_{int(time.time())}_{str(uuid.uuid4())[:8]}"
         
-        # Get contacts that need enrichment - SKIP ALREADY ENRICHED
-        all_contacts, total = storage_manager.get_contacts(user_id, limit=limit * 2)  # Get more to filter
+        # Initialize job status
+        with jobs_lock:
+            background_jobs[job_id] = {
+                'id': job_id,
+                'user_email': user_email,
+                'status': 'started',
+                'progress': 0,
+                'message': 'Initializing contact enrichment...',
+                'created_at': time.time(),
+                'contacts_enriched': 0,
+                'contacts_processed': 0
+            }
         
-        # Filter out contacts that already have enrichment data (resume capability)
-        contacts_to_enrich = []
-        already_enriched_count = 0
+        logger.info(f"Background job {job_id} started for contact enrichment")
         
-        for contact in all_contacts:
+        def background_contact_enrichment():
             try:
-                # Check if contact already has enrichment data
-                metadata = contact.get('metadata')
-                if isinstance(metadata, str):
+                # Update status to connecting
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'connecting'
+                        background_jobs[job_id]['message'] = 'Connecting to database...'
+                
+                storage_manager = get_storage_manager_sync()
+                user = storage_manager.get_user_by_email(user_email)
+                if not user:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'failed'
+                            background_jobs[job_id]['message'] = 'User not found in database'
+                    return
+                
+                user_id = user['id']
+                
+                # Get contacts that need enrichment - SKIP ALREADY ENRICHED
+                all_contacts, total = storage_manager.get_contacts(user_id, limit=limit * 2)  # Get more to filter
+                
+                # Filter out contacts that already have enrichment data (resume capability)
+                contacts_to_enrich = []
+                already_enriched_count = 0
+                
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'filtering'
+                        background_jobs[job_id]['message'] = f'Filtering {len(all_contacts)} contacts for enrichment...'
+                
+                for contact in all_contacts:
                     try:
-                        metadata = json.loads(metadata)
-                    except:
-                        metadata = {}
-                elif not isinstance(metadata, dict):
-                    metadata = {}
-                else:
-                    metadata = metadata or {}
-                
-                # Skip if already enriched with good confidence
-                enrichment_data = metadata.get('enrichment_data', {})
-                if enrichment_data and enrichment_data.get('confidence_score', 0) > 0.3:
-                    already_enriched_count += 1
-                    logger.info(f"⏭️ Skipping {contact['email']} - already enriched (confidence: {enrichment_data.get('confidence_score', 0)})")
-                    continue
-                
-                contacts_to_enrich.append(contact)
-                
-                # Stop when we have enough to process
-                if len(contacts_to_enrich) >= limit:
-                    break
-                    
-            except Exception as e:
-                logger.error(f"Error checking enrichment status for {contact.get('email', 'unknown')}: {e}")
-                contacts_to_enrich.append(contact)  # Include if we can't determine status
-        
-        contacts = contacts_to_enrich
-        
-        if not contacts:
-            return jsonify({
-                'success': True,
-                'message': f'No contacts need enrichment. {already_enriched_count} contacts already enriched.',
-                'stats': {
-                    'contacts_processed': 0,
-                    'successfully_enriched': 0,
-                    'failed_count': 0,
-                    'success_rate': 0,
-                    'sources_used': 0,
-                    'already_enriched': already_enriched_count,
-                    'resume_capability': True
-                },
-                'mode': 'synchronous'
-            })
-        
-        # Import the advanced contact enrichment service
-        import sys
-        import os
-        import asyncio
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-        
-        from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
-        
-        # Use the advanced enrichment service with multi-strategy web intelligence
-        async def run_advanced_enrichment():
-            enrichment_service = ContactEnrichmentService(user_id, storage_manager)
-            await enrichment_service.initialize()
-            
-            # Get user emails for enrichment context
-            user_emails = []
-            try:
-                user_emails = storage_manager.get_emails(user_id, limit=500)
-                logger.info(f"Retrieved {len(user_emails)} user emails for enrichment context")
-            except Exception as e:
-                logger.warning(f"Could not get user emails for enrichment: {e}")
-            
-            # Run enhanced enrichment
-            enriched_data = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
-            enriched_contacts = enriched_data.get('enriched_contacts', {})
-            
-            # Store enrichment results in database
-            successful_enrichments = 0
-            for email, enrichment_result in enriched_contacts.items():
-                try:
-                    if enrichment_result.get('confidence_score', 0) > 0.3:
-                        # Format enrichment data for database storage
-                        enrichment_data = {
-                            'enrichment_method': 'advanced_web_intelligence',
-                            'enrichment_timestamp': datetime.utcnow().isoformat(),
-                            'enrichment_status': 'success',
-                            'confidence_score': enrichment_result.get('confidence_score', 0),
-                            'data_sources': enrichment_result.get('data_sources', []),
-                            'person_data': enrichment_result.get('person_data', {}),
-                            'company_data': enrichment_result.get('company_data', {}),
-                            'intelligence_summary': enrichment_result.get('intelligence_summary', {})
-                        }
-                        
-                        # Update contact metadata in database
-                        success = storage_manager.postgres.update_contact_metadata(
-                            user_id, email, {'enrichment_data': enrichment_data}
-                        )
-                        
-                        if success:
-                            successful_enrichments += 1
-                            logger.info(f"✅ Stored enrichment for {email} in database")
+                        # Check if contact already has enrichment data
+                        metadata = contact.get('metadata')
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except:
+                                metadata = {}
+                        elif not isinstance(metadata, dict):
+                            metadata = {}
                         else:
-                            logger.warning(f"⚠️ Failed to store enrichment for {email}")
+                            metadata = metadata or {}
+                        
+                        # Skip if already enriched with good confidence
+                        enrichment_data = metadata.get('enrichment_data', {})
+                        if enrichment_data and enrichment_data.get('confidence_score', 0) > 0.3:
+                            already_enriched_count += 1
+                            logger.info(f"⏭️ Skipping {contact['email']} - already enriched (confidence: {enrichment_data.get('confidence_score', 0)})")
+                            continue
+                        
+                        contacts_to_enrich.append(contact)
+                        
+                        # Stop when we have enough to process
+                        if len(contacts_to_enrich) >= limit:
+                            break
                             
-                except Exception as store_error:
-                    logger.error(f"❌ Error storing enrichment for {email}: {store_error}")
-            
-            logger.info(f"💾 Successfully stored {successful_enrichments}/{len(enriched_contacts)} enrichments in database")
-            
-            await enrichment_service.cleanup()
-            
-            # Calculate and return statistics
-            total_processed = len(enriched_contacts)
-            successful = sum(1 for result in enriched_contacts.values() 
-                           if result.get('confidence_score', 0) > 0.3)
-            failed = total_processed - successful
-            success_rate = successful / total_processed if total_processed else 0
-            
-            # Count unique data sources used
-            data_sources = set()
-            for result in enriched_contacts.values():
-                if result.get('data_sources'):
-                    data_sources.update(result['data_sources'])
-            
-            return {
-                'contacts_processed': total_processed,
-                'successfully_enriched': successful,
-                'failed_count': failed,
-                'success_rate': success_rate,
-                'sources_used': len(data_sources),
-                'data_sources_list': list(data_sources),
-                'domains_analyzed': enriched_data.get('domains_analyzed', 0),
-                'enrichments_stored_in_db': successful_enrichments,
-                'enrichment_results': enriched_contacts,
-                'mode': 'advanced_web_intelligence_with_db_storage'
-            }
+                    except Exception as e:
+                        logger.error(f"Error checking enrichment status for {contact.get('email', 'unknown')}: {e}")
+                        contacts_to_enrich.append(contact)  # Include if we can't determine status
+                
+                contacts = contacts_to_enrich
+                
+                if not contacts:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'completed'
+                            background_jobs[job_id]['progress'] = 100
+                            background_jobs[job_id]['message'] = f'No contacts need enrichment. {already_enriched_count} contacts already enriched.'
+                            background_jobs[job_id]['already_enriched'] = already_enriched_count
+                            background_jobs[job_id]['contacts_enriched'] = 0
+                            background_jobs[job_id]['contacts_processed'] = 0
+                            background_jobs[job_id]['completed_at'] = time.time()
+                    return
+                
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'processing'
+                        background_jobs[job_id]['message'] = f'Starting enrichment for {len(contacts)} contacts...'
+                        background_jobs[job_id]['total_contacts'] = len(contacts)
+                        background_jobs[job_id]['already_enriched'] = already_enriched_count
+                
+                # Import the advanced contact enrichment service
+                import sys
+                import os
+                import asyncio
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+                
+                from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
+                
+                # Use the advanced enrichment service with multi-strategy web intelligence
+                async def run_advanced_enrichment():
+                    enrichment_service = ContactEnrichmentService(user_id, storage_manager)
+                    await enrichment_service.initialize()
+                    
+                    # Get user emails for enrichment context
+                    user_emails = []
+                    try:
+                        user_emails = storage_manager.get_emails_for_user(user_id, limit=500)
+                        logger.info(f"Retrieved {len(user_emails)} user emails for enrichment context")
+                    except Exception as e:
+                        logger.warning(f"Could not get user emails for enrichment: {e}")
+                    
+                    # Run enhanced enrichment
+                    enriched_data = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
+                    enriched_contacts = enriched_data.get('enriched_contacts', {})
+                    
+                    # Store enrichment results in database
+                    successful_enrichments = 0
+                    for i, (email, enrichment_result) in enumerate(enriched_contacts.items()):
+                        try:
+                            # Update progress every few contacts
+                            if i % 5 == 0:
+                                progress = int((i / len(enriched_contacts)) * 90) + 10  # Reserve 10% for completion
+                                with jobs_lock:
+                                    if job_id in background_jobs:
+                                        background_jobs[job_id]['progress'] = progress
+                                        background_jobs[job_id]['contacts_processed'] = i
+                                        background_jobs[job_id]['contacts_enriched'] = successful_enrichments
+                                        background_jobs[job_id]['message'] = f'Storing enrichment {i+1}/{len(enriched_contacts)}: {email}'
+                            
+                            if enrichment_result.get('confidence_score', 0) > 0.3:
+                                # Format enrichment data for database storage
+                                enrichment_data = {
+                                    'enrichment_method': 'advanced_web_intelligence',
+                                    'enrichment_timestamp': datetime.utcnow().isoformat(),
+                                    'enrichment_status': 'success',
+                                    'confidence_score': enrichment_result.get('confidence_score', 0),
+                                    'data_sources': enrichment_result.get('data_sources', []),
+                                    'person_data': enrichment_result.get('person_data', {}),
+                                    'company_data': enrichment_result.get('company_data', {}),
+                                    'intelligence_summary': enrichment_result.get('intelligence_summary', {})
+                                }
+                                
+                                # Update contact metadata in database
+                                success = storage_manager.postgres.update_contact_metadata(
+                                    user_id, email, {'enrichment_data': enrichment_data}
+                                )
+                                
+                                if success:
+                                    successful_enrichments += 1
+                                    logger.info(f"✅ Stored enrichment for {email} in database")
+                                else:
+                                    logger.warning(f"⚠️ Failed to store enrichment for {email}")
+                                    
+                        except Exception as store_error:
+                            logger.error(f"❌ Error storing enrichment for {email}: {store_error}")
+                    
+                    logger.info(f"💾 Successfully stored {successful_enrichments}/{len(enriched_contacts)} enrichments in database")
+                    
+                    await enrichment_service.cleanup()
+                    
+                    # Calculate and return statistics
+                    total_processed = len(enriched_contacts)
+                    successful = sum(1 for result in enriched_contacts.values() 
+                                   if result.get('confidence_score', 0) > 0.3)
+                    failed = total_processed - successful
+                    success_rate = successful / total_processed if total_processed else 0
+                    
+                    # Count unique data sources used
+                    data_sources = set()
+                    for result in enriched_contacts.values():
+                        if result.get('data_sources'):
+                            data_sources.update(result['data_sources'])
+                    
+                    return {
+                        'contacts_processed': total_processed,
+                        'successfully_enriched': successful,
+                        'failed_count': failed,
+                        'success_rate': success_rate,
+                        'sources_used': len(data_sources),
+                        'data_sources_list': list(data_sources),
+                        'domains_analyzed': enriched_data.get('domains_analyzed', 0),
+                        'enrichments_stored_in_db': successful_enrichments,
+                        'enrichment_results': enriched_contacts,
+                        'mode': 'advanced_web_intelligence_with_db_storage_background'
+                    }
+                
+                # Run the async advanced enrichment in a synchronous context
+                try:
+                    # Create new event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    stats = loop.run_until_complete(run_advanced_enrichment())
+                    loop.close()
+                except Exception as e:
+                    logger.error(f"Advanced contact enrichment failed: {e}")
+                    # Fallback to basic enrichment if advanced one fails
+                    stats = {
+                        'contacts_processed': len(contacts),
+                        'successfully_enriched': 0,
+                        'failed_count': len(contacts),
+                        'success_rate': 0.0,
+                        'sources_used': 0,
+                        'error': f"Advanced enrichment failed: {str(e)}",
+                        'mode': 'fallback_error_background'
+                    }
+                
+                # Final status update
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'completed'
+                        background_jobs[job_id]['progress'] = 100
+                        background_jobs[job_id]['message'] = f'Contact enrichment complete! Enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts'
+                        background_jobs[job_id]['contacts_enriched'] = stats["successfully_enriched"]
+                        background_jobs[job_id]['contacts_processed'] = stats["contacts_processed"]
+                        background_jobs[job_id]['success_rate'] = stats["success_rate"]
+                        background_jobs[job_id]['sources_used'] = stats["sources_used"]
+                        background_jobs[job_id]['completed_at'] = time.time()
+                
+                logger.info(f"Advanced contact enrichment completed for user {user_email}", stats=stats)
+                
+            except Exception as e:
+                logger.error(f"Background contact enrichment job {job_id} failed: {str(e)}")
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'failed'
+                        background_jobs[job_id]['message'] = f'Contact enrichment failed: {str(e)}'
         
-        # Run the async advanced enrichment in a synchronous context
-        try:
-            # Create new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            stats = loop.run_until_complete(run_advanced_enrichment())
-            loop.close()
-        except Exception as e:
-            logger.error(f"Advanced contact enrichment failed: {e}")
-            # Fallback to basic enrichment if advanced one fails
-            stats = {
-                'contacts_processed': len(contacts),
-                'successfully_enriched': 0,
-                'failed_count': len(contacts),
-                'success_rate': 0.0,
-                'sources_used': 0,
-                'error': f"Advanced enrichment failed: {str(e)}",
-                'mode': 'fallback_error'
-            }
+        # Start background thread
+        import threading
+        thread = threading.Thread(target=background_contact_enrichment)
+        thread.daemon = True
+        thread.start()
         
-        # Create success message with details about advanced features
-        advanced_features = stats.get('advanced_features', {})
-        features_summary = []
-        if advanced_features.get('browser_automation_used', 0) > 0:
-            features_summary.append(f"browser automation ({advanced_features['browser_automation_used']} sites)")
-        if advanced_features.get('multi_engine_search_used', 0) > 0:
-            features_summary.append(f"multi-engine search ({advanced_features['multi_engine_search_used']} queries)")
-        if advanced_features.get('company_intelligence_gathered', 0) > 0:
-            features_summary.append(f"company intelligence ({advanced_features['company_intelligence_gathered']} companies)")
-        
-        features_text = ", ".join(features_summary) if features_summary else "basic enrichment"
-        
-        logger.info(f"Advanced contact enrichment completed for user {user_email}", stats=stats)
-        
-        # Create enhanced message with resume info
-        if already_enriched_count > 0:
-            message = f'Successfully enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts using {features_text}. Skipped {already_enriched_count} already-enriched contacts (resume capability).'
-        else:
-            message = f'Successfully enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts using {features_text}'
-        
-        # Add resume capability info to stats
-        stats['already_enriched'] = already_enriched_count
-        stats['resume_capability'] = True
-        stats['contacts_remaining'] = max(0, total - already_enriched_count - stats["contacts_processed"])
+        logger.info(f"Started background contact enrichment job {job_id} for user {user_email}")
         
         return jsonify({
             'success': True,
-            'message': message,
-            'stats': stats,
-            'mode': 'synchronous_with_advanced_intelligence'
+            'job_id': job_id,
+            'status': 'started',
+            'message': 'Contact enrichment started in background',
+            'status_url': f'/api/job-status/{job_id}',
+            'mode': 'synchronous_background'
         })
         
     except Exception as e:
