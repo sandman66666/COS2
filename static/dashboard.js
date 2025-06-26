@@ -3519,7 +3519,18 @@ async function startFromSelectedStep() {
                                 force_refresh: true 
                             })
                         });
-                        return await response.json();
+                        const result = await response.json();
+                    
+                    // Check if this is a background job
+                    if (result.job_id && result.status_url) {
+                        console.log(`⏳ Background job started: ${result.job_id}`);
+                        showMessage(`⏳ Contact enrichment started in background...`, 'info');
+                        
+                        // Poll for job completion
+                        return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                    }
+                    
+                    return result;
                     });
                     break;
                     
@@ -3571,7 +3582,18 @@ async function startFromSelectedStep() {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ force_rebuild: true })
                         });
-                        return await response.json();
+                        const result = await response.json();
+                    
+                    // Check if this is a background job
+                    if (result.job_id && result.status_url) {
+                        console.log(`⏳ Background job started: ${result.job_id}`);
+                        showMessage(`⏳ Contact enrichment started in background...`, 'info');
+                        
+                        // Poll for job completion
+                        return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                    }
+                    
+                    return result;
                     });
                     break;
                     
@@ -4177,7 +4199,18 @@ async function startFromStep(stepId, stepNumber) {
                             throw new Error('Authentication required - please log in again');
                         }
                         
-                        return await response.json();
+                        const result = await response.json();
+                    
+                    // Check if this is a background job
+                    if (result.job_id && result.status_url) {
+                        console.log(`⏳ Background job started: ${result.job_id}`);
+                        showMessage(`⏳ Contact enrichment started in background...`, 'info');
+                        
+                        // Poll for job completion
+                        return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                    }
+                    
+                    return result;
                     });
                     break;
                     
@@ -4212,7 +4245,18 @@ async function startFromStep(stepId, stepNumber) {
                             throw new Error('Authentication required - please log in again');
                         }
                         
-                        return await response.json();
+                        const result = await response.json();
+                    
+                    // Check if this is a background job
+                    if (result.job_id && result.status_url) {
+                        console.log(`⏳ Background job started: ${result.job_id}`);
+                        showMessage(`⏳ Contact enrichment started in background...`, 'info');
+                        
+                        // Poll for job completion
+                        return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                    }
+                    
+                    return result;
                     });
                     break;
                     
@@ -4469,7 +4513,18 @@ async function runIndividualStep(stepId) {
                         throw new Error('Authentication required - please log in again');
                     }
                     
-                    return await response.json();
+                    const result = await response.json();
+                    
+                    // Check if this is a background job
+                    if (result.job_id && result.status_url) {
+                        console.log(`⏳ Background job started: ${result.job_id}`);
+                        showMessage(`⏳ Contact enrichment started in background...`, 'info');
+                        
+                        // Poll for job completion
+                        return await pollJobStatus(result.job_id, result.status_url, 'augment');
+                    }
+                    
+                    return result;
                 });
                 break;
                 
