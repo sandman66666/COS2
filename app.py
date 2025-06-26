@@ -10,7 +10,7 @@ import os
 import logging
 import json
 from datetime import datetime
-from flask import Flask, request, session, render_template, jsonify
+from flask import Flask, request, session, render_template, jsonify, send_from_directory
 from flask_cors import CORS
 import sys
 import asyncio
@@ -88,6 +88,11 @@ def create_app():
     def dashboard():
         """Dashboard route that serves the main dashboard"""
         return render_template('dashboard_new.html')
+    
+    @app.route('/react')
+    def react_dashboard():
+        """Serve the React dashboard"""
+        return send_from_directory('static/react', 'index.html')
     
     @app.route('/login')
     def login_page():

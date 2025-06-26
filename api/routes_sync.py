@@ -1128,10 +1128,16 @@ def analyze_sent_emails():
                         background_jobs[job_id]['status'] = 'completed'
                         background_jobs[job_id]['progress'] = 100
                         background_jobs[job_id]['message'] = f'Analysis complete! Found {len(contacts_dict)} contacts from {emails_processed} emails'
-                        background_jobs[job_id]['contacts_found'] = len(contacts_dict)
-                        background_jobs[job_id]['contacts_saved'] = contacts_saved
-                        background_jobs[job_id]['emails_processed'] = emails_processed
                         background_jobs[job_id]['completed_at'] = time.time()
+                        # Structure the result properly for React pollJobStatus
+                        background_jobs[job_id]['result'] = {
+                            'success': True,
+                            'contacts': list(contacts_dict.values()),
+                            'total_sent_emails': emails_processed,
+                            'contacts_found': len(contacts_dict),
+                            'contacts_saved': contacts_saved,
+                            'message': f'Analysis complete! Found {len(contacts_dict)} contacts from {emails_processed} emails'
+                        }
                 
                 logger.info(f"Gmail analysis completed for {user_email}: {len(contacts_dict)} contacts from {emails_processed} emails")
                 

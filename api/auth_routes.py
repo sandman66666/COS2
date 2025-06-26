@@ -193,8 +193,8 @@ async def google_callback():
         
         logger.info("User authenticated successfully", email=user_email)
         
-        # Redirect to dashboard with success indicator
-        response = redirect('/dashboard?login_success=true&authenticated=true&t=' + str(int(time.time())))
+        # Redirect to React app instead of backend dashboard
+        response = redirect(f'http://localhost:3000/?login_success=true&authenticated=true&t={int(time.time())}')
         
         # Set auth cookie with the actual access token
         response.set_cookie(
@@ -230,8 +230,8 @@ def logout():
     
     logger.info("User logged out", user_id=user_id, email=user_email)
     
-    # Redirect to login with cache-busting parameter
-    response = redirect('/login' + '?logged_out=true')
+    # Redirect to React app login page with cache-busting parameter
+    response = redirect(f'http://localhost:3000/?logged_out=true&t={int(time.time())}')
     
     # Clear auth token cookie
     response.set_cookie('auth_token', '', expires=0, path='/')
@@ -256,9 +256,8 @@ def force_logout():
         logger.info("Force logout completed", 
                    user_id=user_id, email=user_email)
         
-        # Create response with aggressive cache clearing
-        response = redirect('/login' + 
-                          f'?force_logout=true&t={int(time.time())}')
+        # Create response with aggressive cache clearing - redirect to React app
+        response = redirect(f'http://localhost:3000/?force_logout=true&t={int(time.time())}')
         
         # Clear all possible cookies and cache
         response.set_cookie('session', '', expires=0, path='/')
