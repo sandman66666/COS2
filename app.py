@@ -81,18 +81,23 @@ def create_app():
     # Main dashboard route
     @app.route('/')
     def index():
-        """Serve the main dashboard"""
-        return render_template('dashboard_new.html')
+        """Serve the React dashboard as the main entry point"""
+        return send_from_directory('static/react', 'index.html')
     
     @app.route('/dashboard')
     def dashboard():
-        """Dashboard route that serves the main dashboard"""
+        """Legacy dashboard route that serves the old HTML dashboard"""
         return render_template('dashboard_new.html')
     
     @app.route('/react')
     def react_dashboard():
-        """Serve the React dashboard"""
+        """Serve the React dashboard (alias for root)"""
         return send_from_directory('static/react', 'index.html')
+    
+    @app.route('/legacy')
+    def legacy_dashboard():
+        """Serve the legacy HTML dashboard"""
+        return render_template('dashboard_new.html')
     
     @app.route('/login')
     def login_page():
