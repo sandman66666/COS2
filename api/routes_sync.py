@@ -908,14 +908,16 @@ def analyze_sent_emails():
                 
                 # Get storage manager and user ID
                 storage_manager = get_storage_manager_sync()
-                user_id = storage_manager.get_user_id_by_email(user_email)
+                user = storage_manager.get_user_by_email(user_email)
                 
-                if not user_id:
+                if not user:
                     with jobs_lock:
                         if job_id in background_jobs:
                             background_jobs[job_id]['status'] = 'failed'
                             background_jobs[job_id]['message'] = 'User not found in database'
                     return
+                
+                user_id = user['id']
                 
                 # Create credentials object from session data
                 try:
