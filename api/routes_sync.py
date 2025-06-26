@@ -850,6 +850,7 @@ def analyze_sent_emails():
         
         # Generate unique job ID
         import uuid
+        import time
         job_id = f"analyze_sent_{user_email}_{int(time.time())}_{str(uuid.uuid4())[:8]}"
         
         # Validate user exists
@@ -917,6 +918,7 @@ def analyze_sent_emails():
                 import base64
                 import email
                 import re
+                import time
                 
                 # Create credentials object
                 credentials = Credentials(
