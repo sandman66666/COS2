@@ -233,9 +233,12 @@ class ContactEnrichmentService:
                 'seniority_level': getattr(enrichment_result, 'person_data', {}).get('seniority_level', ''),
             }
             
-            # Store in contact metadata
-            await self.storage_manager.update_contact_metadata(self.user_id, email, enrichment_data)
-            logger.info(f"💾 Stored comprehensive enrichment data for {email}")
+            # Store in contact metadata (this is a synchronous call, not async)
+            success = self.storage_manager.postgres.update_contact_metadata(self.user_id, email, {'enrichment_data': enrichment_data})
+            if success:
+                logger.info(f"💾 Stored comprehensive enrichment data for {email}")
+            else:
+                logger.warning(f"⚠️ Failed to store enrichment data for {email}")
             
         except Exception as e:
             logger.error(f"Failed to store enrichment for {email}: {e}")
