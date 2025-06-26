@@ -570,50 +570,13 @@ def test_sync_auth():
 @api_sync_bp.route('/emails/sync', methods=['POST'])
 @require_auth
 def sync_emails():
-    """Email sync filtered by discovered contacts - time-based, all contacts (synchronous)"""
+    """Email sync filtered by discovered contacts - time-based, all contacts (synchronous background job)"""
     try:
         user_email = session.get('user_id', 'test@session-42.com')
         request_data = request.get_json() or {}
         days = request_data.get('days', 30)
         
-        # Import Gmail client and make it work synchronously
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-        
-        from datetime import datetime, timedelta
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        import time
-        import base64
-        import email
-        import re
-        
-        storage_manager = get_storage_manager_sync()
-        user = storage_manager.get_user_by_email(user_email)
-        if not user:
-            return jsonify({
-                'success': False,
-                'error': 'User not found',
-                'mode': 'synchronous'
-            }), 404
-        
-        user_id = user['id']
-        
-        # Get ALL contacts from Step 1 (no trust tier filtering)
-        target_contacts = set()
-        contacts, _ = storage_manager.get_contacts(user_id, limit=10000)  # Get all contacts
-        for contact in contacts:
-            target_contacts.add(contact['email'].lower())
-        
-        if not target_contacts:
-            return jsonify({
-                'success': False,
-                'error': 'No contacts found. Please run Step 1 (Extract Official Contacts) first.',
-                'mode': 'synchronous'
-            }), 400
-        
-        logger.info(f"Syncing emails from {len(target_contacts)} discovered contacts for past {days} days")
+        logger.info(f"Starting email sync as background job for user {user_email}")
         
         # Get OAuth credentials from session
         oauth_credentials = session.get('oauth_credentials')
@@ -625,214 +588,318 @@ def sync_emails():
                 'mode': 'synchronous'
             }), 401
         
-        # Create credentials object
-        try:
-            credentials = Credentials(
-                token=oauth_credentials.get('access_token'),
-                refresh_token=oauth_credentials.get('refresh_token'),
-                token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
-                client_id=oauth_credentials.get('client_id'),
-                client_secret=oauth_credentials.get('client_secret'),
-                scopes=oauth_credentials.get('scopes', [])
-            )
-        except Exception as cred_error:
-            return jsonify({
-                'success': False,
-                'error': f'Gmail credentials are invalid or expired. Please log out and log back in to re-authenticate. Error: {str(cred_error)}',
-                'action_required': 'reauth',
-                'mode': 'synchronous'
-            }), 401
+        # Generate unique job ID
+        import uuid
+        import time
+        job_id = f"email_sync_{user_email}_{int(time.time())}_{str(uuid.uuid4())[:8]}"
         
-        # Build Gmail service
-        try:
-            service = build('gmail', 'v1', credentials=credentials)
-        except Exception as service_error:
-            return jsonify({
-                'success': False,
-                'error': f'Failed to connect to Gmail API. Please log out and log back in to re-authenticate. Error: {str(service_error)}',
-                'action_required': 'reauth',
-                'mode': 'synchronous'
-            }), 401
+        # Initialize job status
+        with jobs_lock:
+            background_jobs[job_id] = {
+                'id': job_id,
+                'user_email': user_email,
+                'status': 'started',
+                'progress': 0,
+                'message': 'Initializing email sync...',
+                'created_at': time.time(),
+                'emails_synced': 0,
+                'contacts_processed': 0
+            }
         
-        # Calculate date range
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        logger.info(f"Background job {job_id} started for email sync")
         
-        processed_count = 0
-        new_emails = 0
-        updated_emails = 0
-        contacts_processed = 0
-        
-        # Process emails for each contact individually - no limits, just time-based
-        logger.info(f"Searching for ALL emails from discovered contacts since {cutoff_date.strftime('%Y-%m-%d')}")
-        
-        for contact_email in target_contacts:
+        def background_email_sync():
             try:
-                contacts_processed += 1
+                # Import Gmail client and make it work synchronously
+                import sys
+                import os
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
                 
-                # Build query for this specific contact - time-based only
-                query = f'(from:{contact_email} OR to:{contact_email}) after:{cutoff_date.strftime("%Y/%m/%d")}'
+                from datetime import datetime, timedelta
+                from google.oauth2.credentials import Credentials
+                from googleapiclient.discovery import build
+                import time
+                import base64
+                import email
+                import re
                 
-                logger.info(f"Processing contact {contacts_processed}/{len(target_contacts)}: {contact_email}")
+                # Update status to connecting
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'connecting'
+                        background_jobs[job_id]['message'] = 'Connecting to database and Gmail...'
                 
-                # Get ALL messages for this contact (no maxResults limit for time-based approach)
-                messages = []
-                page_token = None
+                storage_manager = get_storage_manager_sync()
+                user = storage_manager.get_user_by_email(user_email)
+                if not user:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'failed'
+                            background_jobs[job_id]['message'] = 'User not found in database'
+                    return
                 
-                while True:
+                user_id = user['id']
+                
+                # Get ALL contacts from Step 1 (no trust tier filtering)
+                target_contacts = set()
+                contacts, _ = storage_manager.get_contacts(user_id, limit=10000)  # Get all contacts
+                for contact in contacts:
+                    target_contacts.add(contact['email'].lower())
+                
+                if not target_contacts:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'failed'
+                            background_jobs[job_id]['message'] = 'No contacts found. Please run Step 1 (Extract Official Contacts) first.'
+                    return
+                
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['message'] = f'Found {len(target_contacts)} contacts to sync emails from'
+                        background_jobs[job_id]['total_contacts'] = len(target_contacts)
+                
+                logger.info(f"Syncing emails from {len(target_contacts)} discovered contacts for past {days} days")
+                
+                # Create credentials object
+                try:
+                    credentials = Credentials(
+                        token=oauth_credentials.get('access_token'),
+                        refresh_token=oauth_credentials.get('refresh_token'),
+                        token_uri=oauth_credentials.get('token_uri', "https://oauth2.googleapis.com/token"),
+                        client_id=oauth_credentials.get('client_id'),
+                        client_secret=oauth_credentials.get('client_secret'),
+                        scopes=oauth_credentials.get('scopes', [])
+                    )
+                except Exception as cred_error:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'failed'
+                            background_jobs[job_id]['message'] = f'Gmail credentials are invalid or expired: {str(cred_error)}'
+                    return
+                
+                # Build Gmail service
+                try:
+                    service = build('gmail', 'v1', credentials=credentials)
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'processing'
+                            background_jobs[job_id]['message'] = 'Connected to Gmail, starting email sync...'
+                except Exception as service_error:
+                    with jobs_lock:
+                        if job_id in background_jobs:
+                            background_jobs[job_id]['status'] = 'failed'
+                            background_jobs[job_id]['message'] = f'Failed to connect to Gmail API: {str(service_error)}'
+                    return
+                
+                # Calculate date range
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+                
+                processed_count = 0
+                new_emails = 0
+                updated_emails = 0
+                contacts_processed = 0
+                
+                target_contacts_list = list(target_contacts)
+                
+                # Process emails for each contact individually - no limits, just time-based
+                logger.info(f"Searching for ALL emails from discovered contacts since {cutoff_date.strftime('%Y-%m-%d')}")
+                
+                for i, contact_email in enumerate(target_contacts_list):
                     try:
-                        if page_token:
-                            messages_response = service.users().messages().list(
-                                userId='me',
-                                q=query,
-                                pageToken=page_token
-                            ).execute()
-                        else:
-                            messages_response = service.users().messages().list(
-                                userId='me',
-                                q=query
-                            ).execute()
+                        contacts_processed += 1
                         
-                        batch_messages = messages_response.get('messages', [])
-                        messages.extend(batch_messages)
+                        # Update progress every 5 contacts
+                        if contacts_processed % 5 == 0:
+                            progress = int((contacts_processed / len(target_contacts_list)) * 100)
+                            with jobs_lock:
+                                if job_id in background_jobs:
+                                    background_jobs[job_id]['progress'] = progress
+                                    background_jobs[job_id]['contacts_processed'] = contacts_processed
+                                    background_jobs[job_id]['emails_synced'] = new_emails
+                                    background_jobs[job_id]['message'] = f'Processing contact {contacts_processed}/{len(target_contacts_list)}: {contact_email} - Found {new_emails} emails so far'
                         
-                        page_token = messages_response.get('nextPageToken')
-                        if not page_token:
-                            break
-                            
-                        # Throttle between API calls
-                        time.sleep(0.1)
+                        # Build query for this specific contact - time-based only
+                        query = f'(from:{contact_email} OR to:{contact_email}) after:{cutoff_date.strftime("%Y/%m/%d")}'
+                        
+                        logger.info(f"Processing contact {contacts_processed}/{len(target_contacts_list)}: {contact_email}")
+                        
+                        # Get ALL messages for this contact (no maxResults limit for time-based approach)
+                        messages = []
+                        page_token = None
+                        
+                        while True:
+                            try:
+                                if page_token:
+                                    messages_response = service.users().messages().list(
+                                        userId='me',
+                                        q=query,
+                                        pageToken=page_token
+                                    ).execute()
+                                else:
+                                    messages_response = service.users().messages().list(
+                                        userId='me',
+                                        q=query
+                                    ).execute()
+                                
+                                batch_messages = messages_response.get('messages', [])
+                                messages.extend(batch_messages)
+                                
+                                page_token = messages_response.get('nextPageToken')
+                                if not page_token:
+                                    break
+                                    
+                                # Throttle between API calls
+                                time.sleep(0.1)
+                                
+                            except Exception as e:
+                                logger.error(f"Error fetching messages page for {contact_email}: {e}")
+                                break
+                        
+                        if not messages:
+                            continue
+                        
+                        logger.info(f"Found {len(messages)} emails for {contact_email}")
+                        
+                        # Process each message
+                        for msg in messages:
+                            try:
+                                # Check if we already have this email
+                                existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
+                                if existing:
+                                    updated_emails += 1
+                                    continue
+                                
+                                # Get full message
+                                msg_data = service.users().messages().get(
+                                    userId='me',
+                                    id=msg['id'],
+                                    format='full'
+                                ).execute()
+                                
+                                # Parse message headers
+                                headers = {}
+                                for header in msg_data.get('payload', {}).get('headers', []):
+                                    name = header.get('name', '').lower()
+                                    value = header.get('value', '')
+                                    headers[name] = value
+                                
+                                # Extract basic info
+                                subject = headers.get('subject', '(No Subject)')
+                                from_addr = headers.get('from', '')
+                                to_addr = headers.get('to', '')
+                                date_str = headers.get('date', '')
+                                
+                                # Verify this email involves our target contact
+                                email_text = f"{from_addr} {to_addr}".lower()
+                                if contact_email not in email_text:
+                                    continue
+                                
+                                # Parse date
+                                try:
+                                    if date_str:
+                                        date_sent = email.utils.parsedate_to_datetime(date_str)
+                                    else:
+                                        date_sent = datetime.now(timezone.utc)
+                                except:
+                                    date_sent = datetime.now(timezone.utc)
+                                
+                                # Skip if email is older than our cutoff (extra safety)
+                                if date_sent < cutoff_date:
+                                    continue
+                                
+                                # Extract body
+                                body_text = ""
+                                if 'payload' in msg_data:
+                                    payload = msg_data['payload']
+                                    if 'parts' in payload:
+                                        for part in payload['parts']:
+                                            if part.get('mimeType') == 'text/plain' and 'body' in part and 'data' in part['body']:
+                                                try:
+                                                    body_text = base64.urlsafe_b64decode(
+                                                        part['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                                    break
+                                                except:
+                                                    pass
+                                    elif 'body' in payload and 'data' in payload['body']:
+                                        if payload.get('mimeType') == 'text/plain':
+                                            try:
+                                                body_text = base64.urlsafe_b64decode(
+                                                    payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
+                                            except:
+                                                pass
+                                
+                                # Store email with contact context
+                                metadata = {
+                                    'subject': subject,
+                                    'from': from_addr,
+                                    'to': to_addr,
+                                    'date': date_str,
+                                    'headers': headers,
+                                    'associated_contact': contact_email,
+                                    'sync_method': 'contact_time_based_background'
+                                }
+                                
+                                # Store new email
+                                storage_manager.postgres.store_email(
+                                    user_id=user_id,
+                                    gmail_id=msg['id'],
+                                    content=body_text,
+                                    metadata=metadata,
+                                    timestamp=date_sent
+                                )
+                                new_emails += 1
+                                processed_count += 1
+                                
+                                # Throttle to avoid quota issues
+                                time.sleep(0.05)
+                                
+                            except Exception as e:
+                                logger.error(f"Error processing email {msg.get('id')} for contact {contact_email}: {e}")
+                                continue
+                        
+                        # Throttle between contacts
+                        time.sleep(0.2)
                         
                     except Exception as e:
-                        logger.error(f"Error fetching messages page for {contact_email}: {e}")
-                        break
-                
-                if not messages:
-                    continue
-                
-                logger.info(f"Found {len(messages)} emails for {contact_email}")
-                
-                # Process each message
-                for msg in messages:
-                    try:
-                        # Check if we already have this email
-                        existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
-                        if existing:
-                            updated_emails += 1
-                            continue
-                        
-                        # Get full message
-                        msg_data = service.users().messages().get(
-                            userId='me',
-                            id=msg['id'],
-                            format='full'
-                        ).execute()
-                        
-                        # Parse message headers
-                        headers = {}
-                        for header in msg_data.get('payload', {}).get('headers', []):
-                            name = header.get('name', '').lower()
-                            value = header.get('value', '')
-                            headers[name] = value
-                        
-                        # Extract basic info
-                        subject = headers.get('subject', '(No Subject)')
-                        from_addr = headers.get('from', '')
-                        to_addr = headers.get('to', '')
-                        date_str = headers.get('date', '')
-                        
-                        # Verify this email involves our target contact
-                        email_text = f"{from_addr} {to_addr}".lower()
-                        if contact_email not in email_text:
-                            continue
-                        
-                        # Parse date
-                        try:
-                            if date_str:
-                                date_sent = email.utils.parsedate_to_datetime(date_str)
-                            else:
-                                date_sent = datetime.now(timezone.utc)
-                        except:
-                            date_sent = datetime.now(timezone.utc)
-                        
-                        # Skip if email is older than our cutoff (extra safety)
-                        if date_sent < cutoff_date:
-                            continue
-                        
-                        # Extract body
-                        body_text = ""
-                        if 'payload' in msg_data:
-                            payload = msg_data['payload']
-                            if 'parts' in payload:
-                                for part in payload['parts']:
-                                    if part.get('mimeType') == 'text/plain' and 'body' in part and 'data' in part['body']:
-                                        try:
-                                            body_text = base64.urlsafe_b64decode(
-                                                part['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                                            break
-                                        except:
-                                            pass
-                            elif 'body' in payload and 'data' in payload['body']:
-                                if payload.get('mimeType') == 'text/plain':
-                                    try:
-                                        body_text = base64.urlsafe_b64decode(
-                                            payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                                    except:
-                                        pass
-                        
-                        # Store email with contact context
-                        metadata = {
-                            'subject': subject,
-                            'from': from_addr,
-                            'to': to_addr,
-                            'date': date_str,
-                            'headers': headers,
-                            'associated_contact': contact_email,
-                            'sync_method': 'contact_time_based'
-                        }
-                        
-                        # Store new email
-                        storage_manager.postgres.store_email(
-                            user_id=user_id,
-                            gmail_id=msg['id'],
-                            content=body_text,
-                            metadata=metadata,
-                            timestamp=date_sent
-                        )
-                        new_emails += 1
-                        processed_count += 1
-                        
-                        # Throttle to avoid quota issues
-                        time.sleep(0.05)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing email {msg.get('id')} for contact {contact_email}: {e}")
+                        logger.error(f"Error processing contact {contact_email}: {e}")
                         continue
                 
-                # Throttle between contacts
-                time.sleep(0.2)
+                # Final status update
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'completed'
+                        background_jobs[job_id]['progress'] = 100
+                        background_jobs[job_id]['message'] = f'Email sync complete! Synced {new_emails} emails from {contacts_processed} contacts'
+                        background_jobs[job_id]['emails_synced'] = new_emails
+                        background_jobs[job_id]['contacts_processed'] = contacts_processed
+                        background_jobs[job_id]['completed_at'] = time.time()
+                
+                logger.info(f"Email sync completed for user {user_email} using time-based contact filtering", 
+                           processed=processed_count, new=new_emails, updated=updated_emails, 
+                           contacts_processed=contacts_processed, target_contacts=len(target_contacts))
                 
             except Exception as e:
-                logger.error(f"Error processing contact {contact_email}: {e}")
-                continue
+                logger.error(f"Background email sync job {job_id} failed: {str(e)}")
+                with jobs_lock:
+                    if job_id in background_jobs:
+                        background_jobs[job_id]['status'] = 'failed'
+                        background_jobs[job_id]['message'] = f'Email sync failed: {str(e)}'
         
-        logger.info(f"Email sync completed for user {user_email} using time-based contact filtering", 
-                   processed=processed_count, new=new_emails, updated=updated_emails, 
-                   contacts_processed=contacts_processed, target_contacts=len(target_contacts))
+        # Start background thread
+        import threading
+        thread = threading.Thread(target=background_email_sync)
+        thread.daemon = True
+        thread.start()
+        
+        logger.info(f"Started background email sync job {job_id} for user {user_email}")
         
         return jsonify({
             'success': True,
-            'message': f'Successfully synced {processed_count} emails from {contacts_processed} contacts over {days} days',
-            'stats': {
-                'processed_emails': processed_count,
-                'new_emails': new_emails,
-                'updated_emails': updated_emails,
-                'days_synced': days,
-                'contacts_processed': contacts_processed,
-                'total_contacts': len(target_contacts),
-                'sync_method': 'time_based_contact_filtering',
-                'date_range': f"{cutoff_date.strftime('%Y-%m-%d')} to {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
-            },
-            'mode': 'synchronous'
+            'job_id': job_id,
+            'status': 'started',
+            'message': 'Email sync started in background',
+            'status_url': f'/api/job-status/{job_id}',
+            'mode': 'synchronous_background'
         })
         
     except Exception as e:
