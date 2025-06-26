@@ -26,7 +26,7 @@ from api.logging_routes_sync import logging_bp
 from api.intelligence_routes_with_logging import intelligence_logging_bp
 # from api.alerts_routes_flask import alerts_bp  # Temporarily disabled - uses async routes
 # from routes.contacts import contacts_bp  # Removed - module doesn't exist
-from middleware.auth_middleware import get_current_user, require_auth, AuthMiddleware
+from middleware.auth_middleware import get_current_user, require_auth
 from storage.storage_manager_sync import initialize_storage_manager_sync
 from utils.logging import structured_logger as logger
 from config.settings import API_SECRET_KEY, API_DEBUG, API_HOST, API_PORT, IS_HEROKU, FORCE_DOMAIN
@@ -36,14 +36,13 @@ def create_app():
     app = Flask(__name__)
     
     # Configure Flask
-    app.config['SECRET_KEY'] = API_SECRET_KEY
+    app.secret_key = API_SECRET_KEY
     app.config['SESSION_COOKIE_SECURE'] = not API_DEBUG  # Secure cookies in production
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 hours
     
     # Enable CORS for development
-    CORS(app, origins=['http://localhost:8080', 'http://127.0.0.1:8080'], 
-         supports_credentials=True)
+    CORS(app, supports_credentials=True, origins=['http://localhost:8080', 'http://127.0.0.1:8080'])
     
     # Setup logging with the custom StructuredLogger 
     # (Note: StructuredLogger doesn't have handlers like standard Python logging)
@@ -61,9 +60,6 @@ def create_app():
     app.register_blueprint(api_sync_bp)  # Use sync API routes
     app.register_blueprint(logging_bp)  # Add logging analysis routes
     app.register_blueprint(intelligence_logging_bp)  # Add intelligence logging routes
-    
-    # Initialize authentication middleware
-    AuthMiddleware(app)
     
     # Domain redirect middleware for OAuth consistency
     @app.before_request
