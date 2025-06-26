@@ -849,7 +849,7 @@ def analyze_sent_emails():
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
         import time
