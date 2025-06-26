@@ -840,26 +840,50 @@ def sync_emails():
 def analyze_sent_emails():
     """Sent email analysis with real Gmail integration (synchronous)"""
     try:
+        logger.info("Starting analyze_sent_emails function")
+        
         user_email = session.get('user_id', 'test@session-42.com')
         request_data = request.get_json() or {}
         lookback_days = request_data.get('lookback_days', 365)
+        
+        logger.info(f"User email: {user_email}, lookback_days: {lookback_days}")
         
         # Import required modules
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from datetime import datetime, timedelta, timezone
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        import time
-        import base64
-        import email
-        import re
+        try:
+            from datetime import datetime, timedelta, timezone
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+            import time
+            import base64
+            import email
+            import re
+            logger.info("Successfully imported all required modules")
+        except ImportError as import_error:
+            logger.error(f"Import error: {import_error}")
+            return jsonify({
+                'success': False,
+                'error': f'Import error: {str(import_error)}',
+                'mode': 'synchronous'
+            }), 500
         
-        storage_manager = get_storage_manager_sync()
+        try:
+            storage_manager = get_storage_manager_sync()
+            logger.info("Successfully got storage manager")
+        except Exception as storage_error:
+            logger.error(f"Storage manager error: {storage_error}")
+            return jsonify({
+                'success': False,
+                'error': f'Storage manager error: {str(storage_error)}',
+                'mode': 'synchronous'
+            }), 500
+            
         user = storage_manager.get_user_by_email(user_email)
         if not user:
+            logger.error(f"User not found: {user_email}")
             return jsonify({
                 'success': False,
                 'error': 'User not found',
@@ -867,10 +891,12 @@ def analyze_sent_emails():
             }), 404
         
         user_id = user['id']
+        logger.info(f"Found user with ID: {user_id}")
         
         # Get OAuth credentials from session
         oauth_credentials = session.get('oauth_credentials')
         if not oauth_credentials:
+            logger.error("No OAuth credentials found in session")
             return jsonify({
                 'success': False,
                 'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
