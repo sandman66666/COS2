@@ -187,83 +187,67 @@ class EnhancedContactEnricher:
                     logger.warning(f"Domain intelligence failed for {domain}: {e}")
             
             # 4. WEB INTELLIGENCE (Enhanced - with fallbacks for memory issues)
-            logger.info(f"🌐 Gathering web intelligence for {email}")
+            logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
             
-            # Skip heavy web scraping if memory is low (simple heuristic)
-            import psutil
-            memory_percent = psutil.virtual_memory().percent
-            
-            if memory_percent < 80:  # Only do web scraping if memory usage is reasonable
-                try:
-                    # Initialize web enrichment orchestrator with timeout
-                    web_orchestrator = EnrichmentOrchestrator(self.user_id)
-                    await asyncio.wait_for(web_orchestrator.initialize(), timeout=30)
-                    
-                    # Prepare contact data for web enrichment
-                    contact_for_enrichment = {
-                        'email': email,
-                        'name': person_data.get('name', ''),
-                        'company': company_data.get('name', ''),
-                        'domain': domain
-                    }
-                    
-                    # Get web intelligence with timeout
-                    web_results = await asyncio.wait_for(
-                        web_orchestrator.enrich_contact(
-                            contact_for_enrichment, 
-                            sources=['linkedin', 'twitter']
-                        ),
-                        timeout=60  # 1 minute timeout per contact
-                    )
-                    
-                    # Process LinkedIn intelligence
-                    if 'linkedin' in web_results and web_results['linkedin'].successful:
-                        linkedin_data = web_results['linkedin'].data
-                        logger.info(f"✅ LinkedIn intelligence gathered for {email}")
-                        
-                        # Enhanced person data from LinkedIn
+            # Initialize web enrichment orchestrator with fallback handling
+            try:
+                web_orchestrator = EnrichmentOrchestrator(self.user_id)
+                await asyncio.wait_for(web_orchestrator.initialize(), timeout=30)
+                
+                # Prepare contact data for web enrichment
+                contact_for_enrichment = {
+                    'email': email,
+                    'name': person_data.get('name', ''),
+                    'company': company_data.get('name', ''),
+                    'domain': domain
+                }
+                
+                # Get comprehensive web intelligence with timeout
+                web_intelligence = await asyncio.wait_for(
+                    web_orchestrator.enrich_contact(contact_for_enrichment),
+                    timeout=60
+                )
+                
+                if web_intelligence:
+                    # Merge web intelligence into person and company data
+                    if 'linkedin_data' in web_intelligence:
+                        linkedin_data = web_intelligence['linkedin_data']
                         person_data.update({
-                            'name': linkedin_data.get('name', person_data.get('name', '')),
-                            'current_title': linkedin_data.get('position', ''),
-                            'company': linkedin_data.get('company', person_data.get('company', '')),
-                            'location': linkedin_data.get('location', ''),
-                            'headline': linkedin_data.get('headline', ''),
-                            'about': linkedin_data.get('about', ''),
                             'experience': linkedin_data.get('experience', []),
                             'education': linkedin_data.get('education', []),
                             'skills': linkedin_data.get('skills', []),
-                            'connections': linkedin_data.get('connections', ''),
-                            'profile_url': linkedin_data.get('profile_url', '')
+                            'about': linkedin_data.get('about', ''),
+                            'current_position': linkedin_data.get('current_position', {}),
+                            'connections': linkedin_data.get('connections', 0)
                         })
-                        
-                        data_sources.append('linkedin_professional_intelligence')
+                        data_sources.append('linkedin_intelligence')
                     
-                    # Process Twitter intelligence  
-                    if 'twitter' in web_results and web_results['twitter'].successful:
-                        twitter_data = web_results['twitter'].data
-                        logger.info(f"✅ Twitter intelligence gathered for {email}")
-                        
-                        # Enhanced thought leadership data
+                    if 'twitter_data' in web_intelligence:
+                        twitter_data = web_intelligence['twitter_data']
                         person_data.update({
-                            'twitter_handle': twitter_data.get('handle', ''),
                             'twitter_bio': twitter_data.get('bio', ''),
-                            'follower_count': twitter_data.get('followers', ''),
+                            'twitter_engagement': twitter_data.get('engagement_metrics', {}),
                             'recent_tweets': twitter_data.get('recent_tweets', []),
-                            'topics_discussed': twitter_data.get('topics', []),
-                            'engagement_level': twitter_data.get('engagement', ''),
-                            'thought_leadership_areas': twitter_data.get('expertise_areas', [])
+                            'thought_leadership_topics': twitter_data.get('topics', [])
                         })
+                        data_sources.append('twitter_intelligence')
+                    
+                    logger.info(f"✅ Comprehensive web intelligence gathered for {email}: LinkedIn={bool(web_intelligence.get('linkedin_data'))}, Twitter={bool(web_intelligence.get('twitter_data'))}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Web intelligence gathering failed for {email} (likely missing Playwright browsers): {e}")
+                logger.info(f"📋 Falling back to basic enrichment without advanced web scraping for {email}")
+                
+                # Fallback: Use basic domain intelligence without browser-based scraping
+                try:
+                    # Basic domain lookup without browser automation
+                    basic_company_info = await self._get_basic_domain_info(domain)
+                    if basic_company_info:
+                        company_data.update(basic_company_info)
+                        data_sources.append('basic_domain_lookup')
                         
-                        data_sources.append('twitter_thought_leadership')
-                    
-                    await web_orchestrator.cleanup()
-                    
-                except asyncio.TimeoutError:
-                    logger.warning(f"⏰ Web intelligence timed out for {email}")
-                except Exception as e:
-                    logger.error(f"❌ Web intelligence gathering failed for {email}: {str(e)}")
-            else:
-                logger.warning(f"⚠️ Skipping web scraping for {email} due to high memory usage ({memory_percent}%)")
+                except Exception as fallback_error:
+                    logger.warning(f"⚠️ Basic domain lookup also failed for {domain}: {fallback_error}")
             
             # 5. CLAUDE SYNTHESIS (Final processing) - Always runs with basic data
             if person_data or company_data:
@@ -1132,10 +1116,10 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
             # 4. COMPREHENSIVE WEB INTELLIGENCE (ENHANCED - Uses multiple professional sources)
             logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
             
-            # Initialize web enrichment orchestrator
-            web_orchestrator = EnrichmentOrchestrator(self.user_id)
+            # Initialize web enrichment orchestrator with fallback handling
             try:
-                await web_orchestrator.initialize()
+                web_orchestrator = EnrichmentOrchestrator(self.user_id)
+                await asyncio.wait_for(web_orchestrator.initialize(), timeout=30)
                 
                 # Prepare contact data for web enrichment
                 contact_for_enrichment = {
@@ -1145,62 +1129,52 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
                     'domain': domain
                 }
                 
-                # Get comprehensive web intelligence from multiple sources
-                web_results = await web_orchestrator.enrich_contact(
-                    contact_for_enrichment, 
-                    sources=['linkedin', 'twitter']  # Use both professional sources
+                # Get comprehensive web intelligence with timeout
+                web_intelligence = await asyncio.wait_for(
+                    web_orchestrator.enrich_contact(contact_for_enrichment),
+                    timeout=60
                 )
                 
-                # Process LinkedIn intelligence
-                if 'linkedin' in web_results and web_results['linkedin'].successful:
-                    linkedin_data = web_results['linkedin'].data
-                    logger.info(f"✅ LinkedIn intelligence gathered for {email}")
-                    
-                    # Enhanced person data from LinkedIn
-                    person_data.update({
-                        'name': linkedin_data.get('name', person_data.get('name', '')),
-                        'current_title': linkedin_data.get('position', ''),
-                        'company': linkedin_data.get('company', person_data.get('company', '')),
-                        'location': linkedin_data.get('location', ''),
-                        'headline': linkedin_data.get('headline', ''),
-                        'about': linkedin_data.get('about', ''),
-                        'experience': linkedin_data.get('experience', []),
-                        'education': linkedin_data.get('education', []),
-                        'skills': linkedin_data.get('skills', []),
-                        'connections': linkedin_data.get('connections', ''),
-                        'profile_url': linkedin_data.get('profile_url', '')
-                    })
-                    
-                    # Enhanced company data if available
-                    if linkedin_data.get('company'):
-                        company_data.update({
-                            'name': linkedin_data.get('company', company_data.get('name', ''))
+                if web_intelligence:
+                    # Merge web intelligence into person and company data
+                    if 'linkedin_data' in web_intelligence:
+                        linkedin_data = web_intelligence['linkedin_data']
+                        person_data.update({
+                            'experience': linkedin_data.get('experience', []),
+                            'education': linkedin_data.get('education', []),
+                            'skills': linkedin_data.get('skills', []),
+                            'about': linkedin_data.get('about', ''),
+                            'current_position': linkedin_data.get('current_position', {}),
+                            'connections': linkedin_data.get('connections', 0)
                         })
+                        data_sources.append('linkedin_intelligence')
                     
-                    data_sources.append('linkedin_professional_intelligence')
-                
-                # Process Twitter intelligence  
-                if 'twitter' in web_results and web_results['twitter'].successful:
-                    twitter_data = web_results['twitter'].data
-                    logger.info(f"✅ Twitter intelligence gathered for {email}")
+                    if 'twitter_data' in web_intelligence:
+                        twitter_data = web_intelligence['twitter_data']
+                        person_data.update({
+                            'twitter_bio': twitter_data.get('bio', ''),
+                            'twitter_engagement': twitter_data.get('engagement_metrics', {}),
+                            'recent_tweets': twitter_data.get('recent_tweets', []),
+                            'thought_leadership_topics': twitter_data.get('topics', [])
+                        })
+                        data_sources.append('twitter_intelligence')
                     
-                    # Enhanced thought leadership data
-                    person_data.update({
-                        'twitter_handle': twitter_data.get('handle', ''),
-                        'twitter_bio': twitter_data.get('bio', ''),
-                        'follower_count': twitter_data.get('followers', ''),
-                        'recent_tweets': twitter_data.get('recent_tweets', []),
-                        'topics_discussed': twitter_data.get('topics', []),
-                        'engagement_level': twitter_data.get('engagement', ''),
-                        'thought_leadership_areas': twitter_data.get('expertise_areas', [])
-                    })
-                    
-                    data_sources.append('twitter_thought_leadership')
+                    logger.info(f"✅ Comprehensive web intelligence gathered for {email}: LinkedIn={bool(web_intelligence.get('linkedin_data'))}, Twitter={bool(web_intelligence.get('twitter_data'))}")
                 
             except Exception as e:
-                logger.error(f"❌ Web intelligence gathering failed for {email}: {str(e)}")
-            finally:
-                await web_orchestrator.cleanup()
+                logger.warning(f"⚠️ Web intelligence gathering failed for {email} (likely missing Playwright browsers): {e}")
+                logger.info(f"📋 Falling back to basic enrichment without advanced web scraping for {email}")
+                
+                # Fallback: Use basic domain intelligence without browser-based scraping
+                try:
+                    # Basic domain lookup without browser automation
+                    basic_company_info = await self._get_basic_domain_info(domain)
+                    if basic_company_info:
+                        company_data.update(basic_company_info)
+                        data_sources.append('basic_domain_lookup')
+                        
+                except Exception as fallback_error:
+                    logger.warning(f"⚠️ Basic domain lookup also failed for {domain}: {fallback_error}")
             
             # 5. CLAUDE SYNTHESIS (Final processing)
             synthesized_data = {'person': person_data, 'company': company_data, 'relationship_intelligence': {}, 'actionable_insights': {}}
@@ -1283,4 +1257,51 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
         except Exception as e:
             result['error'] = f"{type(e).__name__}: {str(e)}"
             
-        return result 
+        return result
+
+    async def _get_basic_domain_info(self, domain: str) -> Dict:
+        """
+        Get basic domain information without browser-based scraping
+        Fallback method when Playwright browsers aren't available
+        """
+        try:
+            # Basic domain intelligence using simple HTTP requests
+            basic_info = {}
+            
+            # Simple domain name cleanup
+            clean_domain = domain.lower().replace('www.', '')
+            company_name = clean_domain.split('.')[0].replace('-', ' ').replace('_', ' ').title()
+            
+            basic_info.update({
+                'name': company_name,
+                'domain': clean_domain,
+                'website': f"https://{clean_domain}",
+                'enrichment_method': 'basic_fallback',
+                'industry': 'Unknown',
+                'description': f"Company associated with {clean_domain}"
+            })
+            
+            # Try to get basic website title/description via simple HTTP request
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                    async with session.get(f"https://{clean_domain}", headers={
+                        'User-Agent': 'Mozilla/5.0 (compatible; contact-enrichment/1.0)'
+                    }) as response:
+                        if response.status == 200:
+                            html = await response.text()
+                            # Simple title extraction
+                            import re
+                            title_match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+                            if title_match:
+                                title = title_match.group(1).strip()
+                                if title and title != company_name:
+                                    basic_info['description'] = title
+                                    
+            except Exception as web_error:
+                logger.debug(f"Basic web request failed for {domain}: {web_error}")
+            
+            return basic_info
+            
+        except Exception as e:
+            logger.warning(f"Basic domain info extraction failed for {domain}: {e}")
+            return {} 
