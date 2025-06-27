@@ -82,3 +82,11 @@ class StructuredLogger:
 
 # Export singleton instance
 structured_logger = StructuredLogger()
+
+# Compatibility function for modules that import get_logger
+def get_logger(name=None):
+    """
+    Compatibility function that returns the structured logger.
+    This provides backward compatibility for modules importing get_logger.
+    """
+    return structured_logger
