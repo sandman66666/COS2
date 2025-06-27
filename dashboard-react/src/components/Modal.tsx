@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import axios from 'axios';
 
 const ModalOverlay = styled.div`
   position: fixed;
@@ -21,9 +22,8 @@ const ModalContainer = styled.div`
   border-radius: ${props => props.theme.borderRadius};
   box-shadow: ${props => props.theme.shadowHover};
   width: 100%;
-  max-width: 1200px;
-  max-height: 90vh;
-  overflow: hidden;
+  max-width: 1400px;
+  max-height: 95vh;
   display: flex;
   flex-direction: column;
 `;
@@ -34,92 +34,108 @@ const ModalHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: ${props => props.theme.colors.surface};
   flex-shrink: 0;
 `;
 
 const ModalTitle = styled.h2`
   color: ${props => props.theme.colors.text};
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   font-weight: 500;
   margin: 0;
 `;
 
-const HeaderActions = styled.div`
-  display: flex;
-  gap: ${props => props.theme.spacing.sm};
-  align-items: center;
-`;
-
-const DownloadButton = styled.button`
-  background: ${props => props.theme.colors.primary};
-  color: ${props => props.theme.colors.text};
-  border: none;
-  border-radius: calc(${props => props.theme.borderRadius} / 2);
-  padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: ${props => props.theme.spacing.xs};
-
-  &:hover {
-    background: ${props => props.theme.colors.primaryHover};
-    transform: scale(1.05);
-  }
-`;
-
 const CloseButton = styled.button`
-  background: ${props => props.theme.colors.error};
-  color: ${props => props.theme.colors.text};
+  background: none;
   border: none;
-  border-radius: calc(${props => props.theme.borderRadius} / 2);
-  padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 1.5rem;
   cursor: pointer;
-  transition: all 0.3s ease;
-
+  color: ${props => props.theme.colors.textMuted};
+  padding: ${props => props.theme.spacing.xs};
+  
   &:hover {
-    background: #6d5555;
-    transform: scale(1.05);
+    color: ${props => props.theme.colors.text};
   }
 `;
 
-const ModalContent = styled.div`
+const ModalBody = styled.div`
   padding: ${props => props.theme.spacing.lg};
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 `;
 
-const ScrollableTableContainer = styled.div`
-  background: ${props => props.theme.colors.surface};
-  border: 1px solid ${props => props.theme.colors.border};
-  border-radius: calc(${props => props.theme.borderRadius} / 2);
-  overflow: hidden;
-  margin-bottom: ${props => props.theme.spacing.lg};
-  max-height: 60vh;
+const LoadingSpinner = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  font-size: 1.2rem;
+  color: ${props => props.theme.colors.textMuted};
 `;
 
-const ScrollableTable = styled.div`
+const ErrorMessage = styled.div`
+  background: rgba(220, 53, 69, 0.1);
+  border: 1px solid #dc3545;
+  border-radius: ${props => props.theme.borderRadius};
+  padding: ${props => props.theme.spacing.lg};
+  color: #dc3545;
+  text-align: center;
+`;
+
+const SummaryGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: ${props => props.theme.spacing.md};
+  margin-bottom: ${props => props.theme.spacing.xl};
+`;
+
+const SummaryCard = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: ${props => props.theme.borderRadius};
+  padding: ${props => props.theme.spacing.lg};
+  text-align: center;
+`;
+
+const SummaryNumber = styled.div`
+  font-size: 2rem;
+  font-weight: 600;
+  color: ${props => props.theme.colors.primary};
+  margin-bottom: ${props => props.theme.spacing.xs};
+`;
+
+const SummaryLabel = styled.div`
+  color: ${props => props.theme.colors.textMuted};
+  font-size: 0.9rem;
+`;
+
+const TableContainer = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: ${props => props.theme.borderRadius};
+  overflow: hidden;
+`;
+
+const TableHeader = styled.div`
+  background: ${props => props.theme.colors.background};
+  padding: ${props => props.theme.spacing.md};
+  border-bottom: 1px solid ${props => props.theme.colors.border};
+  font-weight: 600;
+  color: ${props => props.theme.colors.text};
+  position: sticky;
+  top: 0;
+  z-index: 10;
+`;
+
+const TableScrollContainer = styled.div`
+  max-height: 60vh;
   overflow-y: auto;
-  max-height: 100%;
+  border-bottom: 1px solid ${props => props.theme.colors.border};
 `;
 
 const Table = styled.table`
   width: 100%;
   border-collapse: collapse;
-  min-width: 800px;
-`;
-
-const TableHeader = styled.thead`
-  background: ${props => props.theme.colors.accent};
-  position: sticky;
-  top: 0;
-  z-index: 1;
 `;
 
 const TableHeaderCell = styled.th<{ width?: string }>`
@@ -130,613 +146,737 @@ const TableHeaderCell = styled.th<{ width?: string }>`
   font-size: 0.9rem;
   border-bottom: 1px solid ${props => props.theme.colors.border};
   white-space: nowrap;
+  background: ${props => props.theme.colors.background};
+  position: sticky;
+  top: 0;
+  z-index: 5;
   ${props => props.width && `width: ${props.width};`}
 `;
 
-const TableBody = styled.tbody``;
-
-const TableRow = styled.tr<{ clickable?: boolean }>`
-  &:nth-child(even) {
-    background: ${props => props.theme.colors.background};
-  }
-  
-  &:hover {
-    background: ${props => props.theme.colors.surfaceHover};
-    ${props => props.clickable && 'cursor: pointer;'}
-  }
-`;
-
-const TableCell = styled.td<{ width?: string }>`
-  padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
-  color: ${props => props.theme.colors.text};
-  font-size: 0.85rem;
+const TableCell = styled.td`
+  padding: ${props => props.theme.spacing.md};
   border-bottom: 1px solid ${props => props.theme.colors.border};
-  ${props => props.width && `width: ${props.width};`}
-  word-wrap: break-word;
+  color: ${props => props.theme.colors.text};
+  font-size: 0.9rem;
   vertical-align: top;
 `;
 
-const ExpandableCell = styled(TableCell)`
-  cursor: pointer;
-  
-  &:hover {
-    background: ${props => props.theme.colors.primary};
-    color: ${props => props.theme.colors.background};
-  }
-`;
-
-const ExpandedDetails = styled.div`
-  background: ${props => props.theme.colors.background};
-  padding: ${props => props.theme.spacing.md};
-  border: 1px solid ${props => props.theme.colors.border};
-  border-radius: ${props => props.theme.borderRadius};
-  margin: ${props => props.theme.spacing.sm} 0;
-  max-height: 300px;
-  overflow-y: auto;
-`;
-
-const DetailSection = styled.div`
-  margin-bottom: ${props => props.theme.spacing.md};
-`;
-
-const DetailTitle = styled.h4`
-  color: ${props => props.theme.colors.primary};
-  margin: 0 0 ${props => props.theme.spacing.xs} 0;
-  font-size: 0.9rem;
-`;
-
-const DetailContent = styled.pre`
-  color: ${props => props.theme.colors.text};
-  font-size: 0.8rem;
-  line-height: 1.4;
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  background: ${props => props.theme.colors.surface};
-  padding: ${props => props.theme.spacing.sm};
-  border-radius: calc(${props => props.theme.borderRadius} / 3);
-  border: 1px solid ${props => props.theme.colors.border};
-`;
-
-const SummaryCards = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: ${props => props.theme.spacing.md};
-  margin-bottom: ${props => props.theme.spacing.lg};
-`;
-
-const SummaryCard = styled.div`
-  background: ${props => props.theme.colors.surface};
-  border: 1px solid ${props => props.theme.colors.border};
-  border-radius: calc(${props => props.theme.borderRadius} / 2);
-  padding: ${props => props.theme.spacing.md};
-  text-align: center;
-`;
-
-const SummaryLabel = styled.div`
-  color: ${props => props.theme.colors.textMuted};
-  font-size: 0.8rem;
-  font-weight: 500;
-  margin-bottom: ${props => props.theme.spacing.xs};
-  text-transform: uppercase;
-`;
-
-const SummaryValue = styled.div`
-  color: ${props => props.theme.colors.text};
-  font-size: 1.2rem;
-  font-weight: 600;
-`;
-
-const StatusBadge = styled.span<{ success?: boolean }>`
-  display: inline-block;
+const TrustBadge = styled.span<{ tier: string | number }>`
   padding: ${props => props.theme.spacing.xs} ${props => props.theme.spacing.sm};
-  background: ${props => 
-    props.success 
-      ? props.theme.colors.success 
-      : props.theme.colors.error
-  };
-  color: ${props => props.theme.colors.text};
-  border-radius: calc(${props => props.theme.borderRadius} / 3);
+  border-radius: 12px;
   font-size: 0.8rem;
   font-weight: 500;
-  margin-bottom: ${props => props.theme.spacing.md};
+  white-space: nowrap;
+  
+  background: ${props => {
+    const tierStr = String(props.tier);
+    switch (tierStr) {
+      case 'tier_1': 
+      case '1': 
+      case 'High': return '#d4edda';
+      case 'tier_2': 
+      case '2': 
+      case 'Medium': return '#fff3cd';
+      default: return '#f8d7da';
+    }
+  }};
+  
+  color: ${props => {
+    const tierStr = String(props.tier);
+    switch (tierStr) {
+      case 'tier_1': 
+      case '1': 
+      case 'High': return '#155724';
+      case 'tier_2': 
+      case '2': 
+      case 'Medium': return '#856404';
+      default: return '#721c24';
+    }
+  }};
 `;
 
-const TreeContainer = styled.div`
-  background: ${props => props.theme.colors.surface};
-  border: 1px solid ${props => props.theme.colors.border};
-  border-radius: calc(${props => props.theme.borderRadius} / 2);
-  padding: ${props => props.theme.spacing.lg};
-  margin-bottom: ${props => props.theme.spacing.lg};
-  max-height: 60vh;
-  overflow-y: auto;
-`;
-
-const TreeNode = styled.div<{ level: number; expanded?: boolean }>`
-  margin-left: ${props => props.level * 20}px;
-  margin-bottom: ${props => props.theme.spacing.sm};
-`;
-
-const TreeNodeHeader = styled.div<{ clickable?: boolean }>`
-  display: flex;
-  align-items: center;
-  padding: ${props => props.theme.spacing.sm};
-  border-radius: ${props => props.theme.borderRadius};
+const ExpandableRow = styled.tr<{ clickable?: boolean }>`
   cursor: ${props => props.clickable ? 'pointer' : 'default'};
-  transition: all 0.3s ease;
   
   &:hover {
     background: ${props => props.clickable ? props.theme.colors.surfaceHover : 'transparent'};
   }
 `;
 
-const TreeNodeIcon = styled.span`
-  margin-right: ${props => props.theme.spacing.sm};
+const ExpandedContent = styled.td`
+  padding: ${props => props.theme.spacing.lg};
+  background: ${props => props.theme.colors.background};
+  border-bottom: 2px solid ${props => props.theme.colors.border};
+`;
+
+const DetailGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: ${props => props.theme.spacing.lg};
+`;
+
+const DetailSection = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: ${props => props.theme.borderRadius};
+  padding: ${props => props.theme.spacing.md};
+`;
+
+const DetailTitle = styled.h4`
+  color: ${props => props.theme.colors.text};
+  margin-bottom: ${props => props.theme.spacing.sm};
+  font-size: 1rem;
+`;
+
+const DetailItem = styled.div`
+  margin-bottom: ${props => props.theme.spacing.xs};
+  font-size: 0.9rem;
+  line-height: 1.4;
+`;
+
+const DetailLabel = styled.span`
+  font-weight: 500;
+  color: ${props => props.theme.colors.textMuted};
+  margin-right: ${props => props.theme.spacing.xs};
+`;
+
+const DetailValue = styled.span`
+  color: ${props => props.theme.colors.text};
+`;
+
+const PaginationContainer = styled.div`
+  padding: ${props => props.theme.spacing.md};
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: ${props => props.theme.colors.background};
+  border-top: 1px solid ${props => props.theme.colors.border};
+`;
+
+const PaginationInfo = styled.span`
+  color: ${props => props.theme.colors.textMuted};
   font-size: 0.9rem;
 `;
 
-const TreeNodeTitle = styled.span`
+const PaginationButtons = styled.div`
+  display: flex;
+  gap: ${props => props.theme.spacing.sm};
+`;
+
+const PaginationButton = styled.button`
+  padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: ${props => props.theme.borderRadius};
   color: ${props => props.theme.colors.text};
-  font-weight: 500;
+  cursor: pointer;
   font-size: 0.9rem;
+  
+  &:hover:not(:disabled) {
+    background: ${props => props.theme.colors.surfaceHover};
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const DownloadButton = styled.button`
+  padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
+  background: ${props => props.theme.colors.primary};
+  color: ${props => props.theme.colors.text};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: ${props => props.theme.borderRadius};
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-bottom: ${props => props.theme.spacing.md};
+  
+  &:hover {
+    background: ${props => props.theme.colors.primaryHover};
+  }
+`;
+
+const PreviewText = styled.div`
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: ${props => props.theme.colors.textMuted};
+`;
+
+const EmailSubject = styled.div`
+  font-weight: 500;
+  margin-bottom: ${props => props.theme.spacing.xs};
+`;
+
+const TreeNode = styled.div<{ level: number; clickable?: boolean }>`
+  padding: ${props => props.theme.spacing.sm};
+  margin-left: ${props => props.level * 20}px;
+  border-left: ${props => props.level > 0 ? `2px solid ${props.theme.colors.border}` : 'none'};
+  cursor: ${props => props.clickable ? 'pointer' : 'default'};
+  
+  &:hover {
+    background: ${props => props.clickable ? props.theme.colors.surfaceHover : 'transparent'};
+  }
+`;
+
+const TreeNodeTitle = styled.div`
+  font-weight: 500;
+  color: ${props => props.theme.colors.text};
+  margin-bottom: ${props => props.theme.spacing.xs};
 `;
 
 const TreeNodeDetails = styled.div`
-  background: ${props => props.theme.colors.background};
-  padding: ${props => props.theme.spacing.md};
-  border-radius: ${props => props.theme.borderRadius};
-  margin-top: ${props => props.theme.spacing.sm};
-  border-left: 3px solid ${props => props.theme.colors.primary};
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
+  font-size: 0.9rem;
   color: ${props => props.theme.colors.textMuted};
-  font-style: italic;
-  padding: ${props => props.theme.spacing.xl};
 `;
 
 interface ModalProps {
   stepId: string;
   stepName: string;
-  data: any;
+  data?: any;
   onClose: () => void;
 }
 
-const Modal: React.FC<ModalProps> = ({ stepId, stepName, data, onClose }) => {
-  const [expandedContacts, setExpandedContacts] = useState<Set<string>>(new Set());
-  const [expandedTreeNodes, setExpandedTreeNodes] = useState<Set<string>>(new Set());
+interface FreshData {
+  contacts?: any[];
+  emails?: any[];
+  knowledge_tree?: any;
+  total_contacts?: number;
+  total_emails?: number;
+  [key: string]: any;
+}
 
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose();
+const Modal: React.FC<ModalProps> = ({ stepId, stepName, data, onClose }) => {
+  const [freshData, setFreshData] = useState<FreshData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedContact, setExpandedContact] = useState<string | null>(null);
+  const [expandedNode, setExpandedNode] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageSize] = useState(50);
+
+  useEffect(() => {
+    fetchFreshData();
+  }, [stepId]);
+
+  const fetchFreshData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      let endpoint = '';
+      
+      switch (stepId) {
+        case 'extract':
+          endpoint = '/api/inspect/contacts';
+          break;
+        case 'emails':
+          endpoint = '/api/inspect/emails';
+          break;
+        case 'augment':
+          endpoint = '/api/inspect/contacts';
+          break;
+        case 'tree':
+          endpoint = '/api/inspect/knowledge-tree';
+          break;
+        case 'insights':
+          endpoint = '/api/inspect/contacts'; // Fallback for now
+          break;
+        default:
+          endpoint = '/api/inspect/contacts';
+      }
+
+      console.log(`🔍 Fetching fresh data from ${endpoint} for step ${stepId}`);
+      
+      const response = await axios.get(endpoint);
+      
+      if (response.data.success) {
+        setFreshData(response.data);
+        console.log(`✅ Fresh data loaded for ${stepId}:`, response.data);
+      } else {
+        setError(response.data.error || 'Failed to load data');
+      }
+    } catch (err: any) {
+      console.error(`❌ Error fetching data for ${stepId}:`, err);
+      setError(err.response?.data?.error || err.message || 'Failed to fetch data');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const downloadJSON = () => {
-    const jsonString = JSON.stringify(data, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
+  const downloadData = () => {
+    if (!freshData) return;
+    
+    const dataToDownload = {
+      step: stepId,
+      stepName,
+      timestamp: new Date().toISOString(),
+      data: freshData
+    };
+    
+    const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], { 
+      type: 'application/json' 
+    });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${stepId}-results-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${stepId}-${stepName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const toggleContactExpansion = (contactEmail: string) => {
-    const newExpanded = new Set(expandedContacts);
-    if (newExpanded.has(contactEmail)) {
-      newExpanded.delete(contactEmail);
-    } else {
-      newExpanded.add(contactEmail);
+  const renderContactsView = () => {
+    if (!freshData?.contacts) {
+      return <div>No contacts found.</div>;
     }
-    setExpandedContacts(newExpanded);
-  };
 
-  const toggleTreeNode = (nodeId: string) => {
-    const newExpanded = new Set(expandedTreeNodes);
-    if (newExpanded.has(nodeId)) {
-      newExpanded.delete(nodeId);
-    } else {
-      newExpanded.add(nodeId);
-    }
-    setExpandedTreeNodes(newExpanded);
-  };
-
-  const getSummaryStats = () => {
-    if (!data) return {};
-    
-    const stats: Record<string, any> = {};
-    
-    // Extract statistics based on step type
-    switch (stepId) {
-      case 'extract':
-        if (data.contacts?.length) stats['Contacts Found'] = data.contacts.length;
-        if (data.total_sent_emails) stats['Emails Analyzed'] = data.total_sent_emails;
-        if (data.trust_tier_counts) {
-          const tiers = data.trust_tier_counts;
-          if (tiers.high) stats['High Trust'] = tiers.high;
-          if (tiers.medium) stats['Medium Trust'] = tiers.medium;
-          if (tiers.low) stats['Low Trust'] = tiers.low;
-        }
-        break;
-      
-      case 'emails':
-        if (data.emails?.length) stats['Emails Synced'] = data.emails.length;
-        if (data.contacts_processed) stats['Contacts Processed'] = data.contacts_processed;
-        if (data.new_emails) stats['New Emails'] = data.new_emails;
-        break;
-        
-      case 'augment':
-        if (data.contacts_enriched) stats['Contacts Enriched'] = data.contacts_enriched;
-        if (data.contacts_processed) stats['Contacts Processed'] = data.contacts_processed;
-        if (data.success_rate) stats['Success Rate'] = `${Math.round(data.success_rate * 100)}%`;
-        if (data.sources_used) stats['Data Sources'] = data.sources_used;
-        break;
-        
-      case 'tree':
-        if (data.total_nodes) stats['Knowledge Nodes'] = data.total_nodes;
-        if (data.tree_data?.metadata) {
-          const meta = data.tree_data.metadata;
-          if (meta.total_contacts) stats['Contacts'] = meta.total_contacts;
-          if (meta.total_emails) stats['Emails'] = meta.total_emails;
-        }
-        break;
-    }
-    
-    return stats;
-  };
-
-  const renderContactsTable = () => {
-    const contacts = data.contacts || data.results || [];
-    if (!Array.isArray(contacts) || contacts.length === 0) return null;
-
-    const isAugmented = stepId === 'augment';
+    const contacts = freshData.contacts;
+    const startIndex = currentPage * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedContacts = contacts.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(contacts.length / pageSize);
 
     return (
-      <ScrollableTableContainer>
-        <ScrollableTable>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell width="25%">Email</TableHeaderCell>
-                <TableHeaderCell width="15%">Name</TableHeaderCell>
-                <TableHeaderCell width="12%">Domain</TableHeaderCell>
-                <TableHeaderCell width="10%">Trust Tier</TableHeaderCell>
-                <TableHeaderCell width="8%">Frequency</TableHeaderCell>
-                <TableHeaderCell width="15%">Last Contact</TableHeaderCell>
-                <TableHeaderCell width="15%">Recent Subjects</TableHeaderCell>
-                {isAugmented && <TableHeaderCell width="10%">Enrichment</TableHeaderCell>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {contacts.map((contact: any, index: number) => {
-                const email = contact.email || contact.contact_email || `contact-${index}`;
-                const isExpanded = expandedContacts.has(email);
-                const hasEnrichment = contact.metadata?.enrichment_data || contact.enrichment_data;
-                
-                return (
-                  <React.Fragment key={email}>
-                    <TableRow clickable={isAugmented && hasEnrichment}>
-                      <TableCell width="25%">{email}</TableCell>
-                      <TableCell width="15%">
-                        {contact.name || contact.first_name 
-                          ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name
-                          : email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
-                        }
-                      </TableCell>
-                      <TableCell width="12%">{contact.domain || email.split('@')[1]}</TableCell>
-                      <TableCell width="10%">
-                        <span style={{ 
-                          color: contact.trust_tier === 'tier_1' ? '#28a745' : 
-                                contact.trust_tier === 'tier_2' ? '#ffc107' : '#6c757d' 
-                        }}>
-                          {contact.trust_tier === 'tier_1' ? 'High' : 
-                           contact.trust_tier === 'tier_2' ? 'Medium' : 'Low'}
-                        </span>
-                      </TableCell>
-                      <TableCell width="8%">{contact.frequency || '-'}</TableCell>
-                      <TableCell width="15%">
-                        {contact.last_contact ? new Date(contact.last_contact).toLocaleDateString() : '-'}
-                      </TableCell>
-                      <TableCell width="15%">
-                        {Array.isArray(contact.recent_subjects) 
-                          ? contact.recent_subjects.slice(0, 2).join(', ') 
-                          : '-'}
-                      </TableCell>
-                      {isAugmented && (
-                        <ExpandableCell 
-                          width="10%" 
-                          onClick={() => hasEnrichment && toggleContactExpansion(email)}
-                        >
-                          {hasEnrichment ? (isExpanded ? '▼ Hide' : '▶ View') : 'No data'}
-                        </ExpandableCell>
-                      )}
-                    </TableRow>
-                    {isAugmented && isExpanded && hasEnrichment && (
-                      <TableRow>
-                        <TableCell colSpan={8}>
-                          <ExpandedDetails>
-                            {renderContactEnrichmentDetails(contact)}
-                          </ExpandedDetails>
+      <>
+        <SummaryGrid>
+          <SummaryCard>
+            <SummaryNumber>{contacts.length}</SummaryNumber>
+            <SummaryLabel>Total Contacts</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{contacts.filter(c => String(c.trust_tier) === 'tier_1' || String(c.trust_tier) === '1').length}</SummaryNumber>
+            <SummaryLabel>High Trust</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{contacts.filter(c => String(c.trust_tier) === 'tier_2' || String(c.trust_tier) === '2').length}</SummaryNumber>
+            <SummaryLabel>Medium Trust</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{contacts.filter(c => c.has_augmentation).length}</SummaryNumber>
+            <SummaryLabel>Enriched</SummaryLabel>
+          </SummaryCard>
+        </SummaryGrid>
+
+        <DownloadButton onClick={downloadData}>
+          📥 Download Contact Data (JSON)
+        </DownloadButton>
+
+        <TableContainer>
+          <TableScrollContainer>
+            <Table>
+              <thead>
+                <tr>
+                  <TableHeaderCell width="30%">Contact</TableHeaderCell>
+                  <TableHeaderCell width="25%">Email</TableHeaderCell>
+                  <TableHeaderCell width="15%">Domain</TableHeaderCell>
+                  <TableHeaderCell width="10%">Trust</TableHeaderCell>
+                  <TableHeaderCell width="10%">Frequency</TableHeaderCell>
+                  <TableHeaderCell width="10%">Status</TableHeaderCell>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedContacts.map((contact: any, index: number) => {
+                  const email = contact.email || '';
+                  const name = contact.name || 
+                    email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+                  const isExpandable = stepId === 'augment' && contact.has_augmentation;
+                  const isExpanded = expandedContact === contact.email;
+
+                  return (
+                    <React.Fragment key={contact.email || index}>
+                      <ExpandableRow 
+                        clickable={isExpandable}
+                        onClick={() => isExpandable && setExpandedContact(isExpanded ? null : contact.email)}
+                      >
+                        <TableCell>
+                          <div style={{ fontWeight: 500 }}>{name}</div>
+                          {isExpandable && (
+                            <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                              {isExpanded ? '▼ Click to collapse' : '▶ Click to expand enrichment'}
+                            </div>
+                          )}
                         </TableCell>
-                      </TableRow>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </ScrollableTable>
-      </ScrollableTableContainer>
+                        <TableCell>{email}</TableCell>
+                        <TableCell>{contact.domain || email.split('@')[1] || 'Unknown'}</TableCell>
+                        <TableCell>
+                          <TrustBadge tier={contact.trust_tier}>
+                            {String(contact.trust_tier) === 'tier_1' || String(contact.trust_tier) === '1' ? 'High' :
+                             String(contact.trust_tier) === 'tier_2' || String(contact.trust_tier) === '2' ? 'Medium' : 'Low'}
+                          </TrustBadge>
+                        </TableCell>
+                        <TableCell>{contact.frequency || 0}</TableCell>
+                        <TableCell>
+                          {contact.has_augmentation ? '✅ Enriched' : '⚪ Basic'}
+                        </TableCell>
+                      </ExpandableRow>
+                      
+                      {isExpanded && contact.metadata?.enrichment_data && (
+                        <tr>
+                          <ExpandedContent colSpan={6}>
+                            <DetailGrid>
+                              <DetailSection>
+                                <DetailTitle>📋 Enrichment Summary</DetailTitle>
+                                <DetailItem>
+                                  <DetailLabel>Confidence:</DetailLabel>
+                                  <DetailValue>{Math.round((contact.metadata.enrichment_data.confidence_score || 0) * 100)}%</DetailValue>
+                                </DetailItem>
+                                <DetailItem>
+                                  <DetailLabel>Sources:</DetailLabel>
+                                  <DetailValue>{(contact.metadata.enrichment_data.data_sources || []).join(', ')}</DetailValue>
+                                </DetailItem>
+                                <DetailItem>
+                                  <DetailLabel>Last Updated:</DetailLabel>
+                                  <DetailValue>{contact.metadata.enrichment_data.enrichment_timestamp || 'Unknown'}</DetailValue>
+                                </DetailItem>
+                              </DetailSection>
+                              
+                              {contact.metadata.enrichment_data.person_data && (
+                                <DetailSection>
+                                  <DetailTitle>👤 Personal Info</DetailTitle>
+                                  <DetailItem>
+                                    <DetailLabel>Name:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.person_data.name || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Title:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.person_data.current_title || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Career Stage:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.person_data.career_stage || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                </DetailSection>
+                              )}
+                              
+                              {contact.metadata.enrichment_data.company_data && (
+                                <DetailSection>
+                                  <DetailTitle>🏢 Company Info</DetailTitle>
+                                  <DetailItem>
+                                    <DetailLabel>Company:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.company_data.name || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Industry:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.company_data.industry || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Stage:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.company_data.company_profile?.company_stage || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                </DetailSection>
+                              )}
+                              
+                              {contact.metadata.enrichment_data.intelligence_summary && (
+                                <DetailSection>
+                                  <DetailTitle>🧠 Intelligence Summary</DetailTitle>
+                                  <DetailItem>
+                                    <DetailValue>{JSON.stringify(contact.metadata.enrichment_data.intelligence_summary, null, 2)}</DetailValue>
+                                  </DetailItem>
+                                </DetailSection>
+                              )}
+                            </DetailGrid>
+                          </ExpandedContent>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </TableScrollContainer>
+          
+          {totalPages > 1 && (
+            <PaginationContainer>
+              <PaginationInfo>
+                Showing {startIndex + 1}-{Math.min(endIndex, contacts.length)} of {contacts.length} contacts
+              </PaginationInfo>
+              <PaginationButtons>
+                <PaginationButton
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 0}
+                >
+                  ‹ Previous
+                </PaginationButton>
+                <PaginationButton
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages - 1}
+                >
+                  Next ›
+                </PaginationButton>
+              </PaginationButtons>
+            </PaginationContainer>
+          )}
+        </TableContainer>
+      </>
     );
   };
 
-  const renderContactEnrichmentDetails = (contact: any) => {
-    const enrichmentData = contact.metadata?.enrichment_data || contact.enrichment_data || {};
-    
+  const renderEmailsView = () => {
+    if (!freshData?.emails) {
+      return <div>No emails found. Try running the Email Sync step first.</div>;
+    }
+
+    const emails = freshData.emails;
+    const startIndex = currentPage * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedEmails = emails.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(emails.length / pageSize);
+
     return (
-      <div>
-        <DetailSection>
-          <DetailTitle>🎯 Enrichment Summary</DetailTitle>
-          <DetailContent>
-            {`Confidence Score: ${enrichmentData.confidence_score || 'N/A'}
-Data Sources: ${enrichmentData.data_sources ? enrichmentData.data_sources.join(', ') : 'None'}
-Status: ${enrichmentData.enrichment_status || 'Unknown'}`}
-          </DetailContent>
-        </DetailSection>
+      <>
+        <SummaryGrid>
+          <SummaryCard>
+            <SummaryNumber>{emails.length}</SummaryNumber>
+            <SummaryLabel>Total Emails</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{emails.filter(e => e.from?.includes('@')).length}</SummaryNumber>
+            <SummaryLabel>Received</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{emails.filter(e => e.to?.includes('@')).length}</SummaryNumber>
+            <SummaryLabel>Sent</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{Math.round(emails.reduce((sum, e) => sum + (e.content_length || 0), 0) / emails.length)}</SummaryNumber>
+            <SummaryLabel>Avg Length</SummaryLabel>
+          </SummaryCard>
+        </SummaryGrid>
 
-        {enrichmentData.person_data && (
-          <DetailSection>
-            <DetailTitle>👤 Personal Information</DetailTitle>
-            <DetailContent>{JSON.stringify(enrichmentData.person_data, null, 2)}</DetailContent>
-          </DetailSection>
-        )}
+        <DownloadButton onClick={downloadData}>
+          📥 Download Email Data (JSON)
+        </DownloadButton>
 
-        {enrichmentData.company_data && (
-          <DetailSection>
-            <DetailTitle>🏢 Company Information</DetailTitle>
-            <DetailContent>{JSON.stringify(enrichmentData.company_data, null, 2)}</DetailContent>
-          </DetailSection>
-        )}
-
-        {enrichmentData.intelligence_summary && (
-          <DetailSection>
-            <DetailTitle>🧠 Intelligence Summary</DetailTitle>
-            <DetailContent>{JSON.stringify(enrichmentData.intelligence_summary, null, 2)}</DetailContent>
-          </DetailSection>
-        )}
-
-        {contact.behavioral_intelligence && (
-          <DetailSection>
-            <DetailTitle>📊 Behavioral Intelligence</DetailTitle>
-            <DetailContent>{JSON.stringify(contact.behavioral_intelligence, null, 2)}</DetailContent>
-          </DetailSection>
-        )}
-      </div>
+        <TableContainer>
+          <TableScrollContainer>
+            <Table>
+              <thead>
+                <tr>
+                  <TableHeaderCell width="25%">Subject</TableHeaderCell>
+                  <TableHeaderCell width="20%">From</TableHeaderCell>
+                  <TableHeaderCell width="20%">To</TableHeaderCell>
+                  <TableHeaderCell width="15%">Date</TableHeaderCell>
+                  <TableHeaderCell width="20%">Content Preview</TableHeaderCell>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedEmails.map((email: any, index: number) => (
+                  <tr key={email.id || index}>
+                    <TableCell>
+                      <EmailSubject>{email.subject || '(No Subject)'}</EmailSubject>
+                      <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                        Length: {email.content_length || 0} chars
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div style={{ fontSize: '0.9rem' }}>{email.from || 'Unknown'}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div style={{ fontSize: '0.9rem' }}>
+                        {Array.isArray(email.to) ? email.to.join(', ') : (email.to || 'Unknown')}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div style={{ fontSize: '0.9rem' }}>
+                        {email.date ? new Date(email.date).toLocaleDateString() : 
+                         email.created_at ? new Date(email.created_at).toLocaleDateString() : 'Unknown'}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <PreviewText>
+                        {email.content_preview || email.content || 'No content preview available'}
+                      </PreviewText>
+                    </TableCell>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableScrollContainer>
+          
+          {totalPages > 1 && (
+            <PaginationContainer>
+              <PaginationInfo>
+                Showing {startIndex + 1}-{Math.min(endIndex, emails.length)} of {emails.length} emails
+              </PaginationInfo>
+              <PaginationButtons>
+                <PaginationButton
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 0}
+                >
+                  ‹ Previous
+                </PaginationButton>
+                <PaginationButton
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages - 1}
+                >
+                  Next ›
+                </PaginationButton>
+              </PaginationButtons>
+            </PaginationContainer>
+          )}
+        </TableContainer>
+      </>
     );
   };
 
-  const renderEmailsTable = () => {
-    const emails = data.emails || [];
-    if (!Array.isArray(emails) || emails.length === 0) return null;
+  const renderKnowledgeTreeView = () => {
+    if (!freshData?.knowledge_tree) {
+      return <div>No knowledge tree found. Try running the Build Knowledge Tree step first.</div>;
+    }
 
-    return (
-      <ScrollableTableContainer>
-        <ScrollableTable>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell width="20%">Subject</TableHeaderCell>
-                <TableHeaderCell width="15%">From</TableHeaderCell>
-                <TableHeaderCell width="15%">To</TableHeaderCell>
-                <TableHeaderCell width="12%">Date</TableHeaderCell>
-                <TableHeaderCell width="30%">Content Preview</TableHeaderCell>
-                <TableHeaderCell width="8%">Length</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {emails.map((email: any, index: number) => (
-                <TableRow key={index}>
-                  <TableCell width="20%">
-                    {email.subject || email.metadata?.subject || 'No Subject'}
-                  </TableCell>
-                  <TableCell width="15%">
-                    {email.from || email.metadata?.from || '-'}
-                  </TableCell>
-                  <TableCell width="15%">
-                    {Array.isArray(email.to) 
-                      ? email.to.join(', ')
-                      : Array.isArray(email.metadata?.to)
-                      ? email.metadata.to.join(', ')
-                      : email.to || email.metadata?.to || '-'}
-                  </TableCell>
-                  <TableCell width="12%">
-                    {email.date 
-                      ? new Date(email.date).toLocaleDateString()
-                      : email.metadata?.date
-                      ? new Date(email.metadata.date).toLocaleDateString()
-                      : '-'}
-                  </TableCell>
-                  <TableCell width="30%">
-                    {(email.content || email.content_preview || '').substring(0, 150)}
-                    {(email.content || email.content_preview || '').length > 150 ? '...' : ''}
-                  </TableCell>
-                  <TableCell width="8%">
-                    {email.content_length || (email.content || '').length || '-'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </ScrollableTable>
-      </ScrollableTableContainer>
-    );
-  };
+    const tree = freshData.knowledge_tree;
 
-  const renderKnowledgeTree = () => {
-    const treeData = data.tree_data || data.tree || data;
-    if (!treeData) return null;
+    const toggleNode = (nodeId: string) => {
+      const newExpanded = new Set(expandedNode);
+      if (newExpanded.has(nodeId)) {
+        newExpanded.delete(nodeId);
+      } else {
+        newExpanded.add(nodeId);
+      }
+      setExpandedNode(newExpanded);
+    };
 
-    const renderTreeNode = (node: any, level: number = 0, parentId: string = ''): React.ReactNode => {
+    const renderNode = (node: any, level: number = 0, parentPath: string = ''): React.ReactNode => {
       if (!node) return null;
       
-      const nodeId = `${parentId}-${node.name || node.title || 'node'}`;
-      const hasChildren = node.children && Array.isArray(node.children) && node.children.length > 0;
-      const isExpanded = expandedTreeNodes.has(nodeId);
+      const nodeId = `${parentPath}/${node.name || node.type || 'unknown'}`;
+      const hasChildren = node.children && node.children.length > 0;
+      const isExpanded = expandedNode.has(nodeId);
 
       return (
-        <TreeNode key={nodeId} level={level}>
-          <TreeNodeHeader 
-            clickable={hasChildren || node.details}
-            onClick={() => hasChildren && toggleTreeNode(nodeId)}
+        <div key={nodeId}>
+          <TreeNode 
+            level={level} 
+            clickable={hasChildren}
+            onClick={() => hasChildren && toggleNode(nodeId)}
           >
-            <TreeNodeIcon>
-              {hasChildren ? (isExpanded ? '📂' : '📁') : '📄'}
-            </TreeNodeIcon>
             <TreeNodeTitle>
-              {node.name || node.title || 'Unnamed Node'}
-              {node.count && ` (${node.count})`}
+              {hasChildren && (isExpanded ? '📂' : '📁')} 
+              {node.name || node.type || 'Unknown Node'}
+              {node.email && ` (${node.email})`}
             </TreeNodeTitle>
-          </TreeNodeHeader>
-          
-          {node.details && (
-            <TreeNodeDetails>
-              <DetailContent>{JSON.stringify(node.details, null, 2)}</DetailContent>
-            </TreeNodeDetails>
-          )}
+            {node.type && (
+              <TreeNodeDetails>
+                Type: {node.type}
+                {node.domain && ` • Domain: ${node.domain}`}
+                {node.trust_tier && ` • Trust: ${node.trust_tier}`}
+              </TreeNodeDetails>
+            )}
+          </TreeNode>
           
           {hasChildren && isExpanded && (
             <div>
               {node.children.map((child: any, index: number) => 
-                renderTreeNode(child, level + 1, `${nodeId}-${index}`)
+                renderNode(child, level + 1, nodeId)
               )}
             </div>
           )}
-        </TreeNode>
+        </div>
       );
     };
 
-    // Handle different tree data structures
-    if (treeData.root) {
-      return (
-        <TreeContainer>
-          {renderTreeNode(treeData.root, 0)}
-        </TreeContainer>
-      );
-    } else if (Array.isArray(treeData)) {
-      return (
-        <TreeContainer>
-          {treeData.map((node, index) => renderTreeNode(node, 0, `root-${index}`))}
-        </TreeContainer>
-      );
-    } else {
-      return (
-        <TreeContainer>
-          {renderTreeNode(treeData, 0)}
-        </TreeContainer>
-      );
-    }
+    return (
+      <>
+        <SummaryGrid>
+          <SummaryCard>
+            <SummaryNumber>{tree.metadata?.total_contacts || 0}</SummaryNumber>
+            <SummaryLabel>Total Contacts</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{tree.metadata?.total_emails || 0}</SummaryNumber>
+            <SummaryLabel>Total Emails</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{tree.root?.children?.length || 0}</SummaryNumber>
+            <SummaryLabel>Main Categories</SummaryLabel>
+          </SummaryCard>
+          <SummaryCard>
+            <SummaryNumber>{tree.metadata?.analysis_type || 'N/A'}</SummaryNumber>
+            <SummaryLabel>Analysis Type</SummaryLabel>
+          </SummaryCard>
+        </SummaryGrid>
+
+        <DownloadButton onClick={downloadData}>
+          📥 Download Knowledge Tree (JSON)
+        </DownloadButton>
+
+        <TableContainer>
+          <TableHeader>Knowledge Tree Structure (Click folders to expand)</TableHeader>
+          <TableScrollContainer>
+            {tree.root && renderNode(tree.root, 0)}
+          </TableScrollContainer>
+        </TableContainer>
+      </>
+    );
   };
 
-  const renderStepContent = () => {
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <LoadingSpinner>
+          🔄 Loading {stepName.toLowerCase()} data...
+        </LoadingSpinner>
+      );
+    }
+
+    if (error) {
+      return (
+        <ErrorMessage>
+          ❌ Error loading data: {error}
+          <br />
+          <button 
+            onClick={fetchFreshData} 
+            style={{ 
+              marginTop: '12px', 
+              padding: '8px 16px', 
+              background: '#dc3545', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px', 
+              cursor: 'pointer' 
+            }}
+          >
+            🔄 Retry
+          </button>
+        </ErrorMessage>
+      );
+    }
+
     switch (stepId) {
       case 'extract':
-        return renderContactsTable();
+        return renderContactsView();
       case 'emails':
-        return renderEmailsTable();
+        return renderEmailsView();
       case 'augment':
-        return renderContactsTable();
+        return renderContactsView();
       case 'tree':
-        return renderKnowledgeTree();
+        return renderKnowledgeTreeView();
+      case 'insights':
+        return <div>Strategic insights view coming soon...</div>;
       default:
-        return (
-          <EmptyState>
-            No specialized view available for this step.
-            <br />
-            Check the raw data below.
-          </EmptyState>
-        );
+        return <div>No specific view available for this step.</div>;
     }
   };
 
-  const summaryStats = getSummaryStats();
-  const isSuccess = data?.success !== false;
-
   return (
-    <ModalOverlay onClick={handleOverlayClick}>
+    <ModalOverlay onClick={(e) => e.target === e.currentTarget && onClose()}>
       <ModalContainer>
         <ModalHeader>
-          <ModalTitle>📊 {stepName} - Results</ModalTitle>
-          <HeaderActions>
-            <DownloadButton onClick={downloadJSON}>
-              💾 Download JSON
-            </DownloadButton>
-            <CloseButton onClick={onClose}>✕ Close</CloseButton>
-          </HeaderActions>
+          <ModalTitle>
+            📊 Inspect: {stepName}
+          </ModalTitle>
+          <CloseButton onClick={onClose}>
+            ✕
+          </CloseButton>
         </ModalHeader>
-        
-        <ModalContent>
-          {data ? (
-            <>
-              <StatusBadge success={isSuccess}>
-                {isSuccess ? '✅ Success' : '❌ Error'}
-              </StatusBadge>
-
-              {Object.keys(summaryStats).length > 0 && (
-                <SummaryCards>
-                  {Object.entries(summaryStats).map(([label, value]) => (
-                    <SummaryCard key={label}>
-                      <SummaryLabel>{label}</SummaryLabel>
-                      <SummaryValue>{value}</SummaryValue>
-                    </SummaryCard>
-                  ))}
-                </SummaryCards>
-              )}
-
-              {data.message && (
-                <div style={{ 
-                  background: '#f8f9fa', 
-                  padding: '12px', 
-                  borderRadius: '6px', 
-                  marginBottom: '16px',
-                  border: '1px solid #e9ecef'
-                }}>
-                  <strong>Summary:</strong> {data.message}
-                </div>
-              )}
-
-              {renderStepContent()}
-
-              {stepId === 'extract' && (!data.contacts || data.contacts.length === 0) && (
-                <div style={{ 
-                  background: '#fff3cd', 
-                  padding: '12px', 
-                  borderRadius: '6px', 
-                  marginBottom: '16px',
-                  border: '1px solid #ffeaa7',
-                  color: '#856404'
-                }}>
-                  <strong>No contacts found.</strong> This might be because:
-                  <ul>
-                    <li>No sent emails in the specified timeframe</li>
-                    <li>Emails don't contain valid recipient addresses</li>
-                    <li>Email addresses were filtered out (common domains, etc.)</li>
-                  </ul>
-                </div>
-              )}
-            </>
-          ) : (
-            <EmptyState>
-              No data available for this step yet.
-              <br />
-              Run the step to see results.
-            </EmptyState>
-          )}
-        </ModalContent>
+        <ModalBody>
+          {renderContent()}
+        </ModalBody>
       </ModalContainer>
     </ModalOverlay>
   );

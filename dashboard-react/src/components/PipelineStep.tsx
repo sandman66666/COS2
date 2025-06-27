@@ -223,14 +223,13 @@ const PipelineStep: React.FC<PipelineStepProps> = ({
             {isRunning ? 'Running...' : '▶️ Run'}
           </ActionButton>
           
-          {hasResult && (
-            <ActionButton
-              onClick={onInspect}
-              disabled={isRunning}
-            >
-              📊 Inspect
-            </ActionButton>
-          )}
+          <ActionButton
+            onClick={onInspect}
+            disabled={isRunning}
+            title="Inspect stored data for this step"
+          >
+            📊 Inspect
+          </ActionButton>
         </StepActions>
       </StepHeader>
 
