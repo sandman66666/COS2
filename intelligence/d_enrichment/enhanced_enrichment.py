@@ -113,7 +113,7 @@ class EnhancedContactEnricher:
     
     async def enrich_contact(self, contact: Dict, user_emails: List[Dict] = None) -> EnhancedEnrichmentResult:
         """
-        Enrich contact using multiple data sources
+        Enrich contact using multiple data sources with robust fallbacks
         
         Args:
             contact: Contact data with email
@@ -143,113 +143,150 @@ class EnhancedContactEnricher:
         company_data = {}
         data_sources = []
         
+        # Initialize synthesized_data early to avoid variable scope issues
+        synthesized_data = {
+            'person': {},
+            'company': {},
+            'relationship_intelligence': {},
+            'actionable_insights': {}
+        }
+        
         try:
             # 1. EMAIL SIGNATURE ANALYSIS (Primary source - most reliable)
-            signature_data = await self._analyze_email_signatures(email, user_emails or [])
-            if signature_data['person'] or signature_data['company']:
-                person_data.update(signature_data['person'])
-                company_data.update(signature_data['company'])
-                data_sources.append('email_signatures')
-                logger.info(f"✅ Extracted data from email signatures for {email}")
+            try:
+                signature_data = await self._analyze_email_signatures(email, user_emails or [])
+                if signature_data['person'] or signature_data['company']:
+                    person_data.update(signature_data['person'])
+                    company_data.update(signature_data['company'])
+                    data_sources.append('email_signatures')
+                    logger.info(f"✅ Extracted data from email signatures for {email}")
+            except Exception as e:
+                logger.warning(f"Email signature analysis failed for {email}: {e}")
             
             # 2. EMAIL CONTENT ANALYSIS (Secondary source)
-            content_data = await self._analyze_email_content(email, user_emails or [])
-            if content_data['person'] or content_data['company']:
-                person_data.update(content_data['person'])
-                company_data.update(content_data['company'])
-                data_sources.append('email_content')
-                logger.info(f"✅ Extracted data from email content for {email}")
+            try:
+                content_data = await self._analyze_email_content(email, user_emails or [])
+                if content_data['person'] or content_data['company']:
+                    person_data.update(content_data['person'])
+                    company_data.update(content_data['company'])
+                    data_sources.append('email_content')
+                    logger.info(f"✅ Extracted data from email content for {email}")
+            except Exception as e:
+                logger.warning(f"Email content analysis failed for {email}: {e}")
             
             # 3. DOMAIN INTELLIGENCE (Tertiary source)
             domain = email.split('@')[1] if '@' in email else None
             if domain and not self._is_generic_domain(domain):
-                domain_data = await self._analyze_domain_intelligence(domain)
-                if domain_data:
-                    company_data.update(domain_data)
-                    data_sources.append('domain_intelligence')
-                    logger.info(f"✅ Extracted domain intelligence for {domain}")
+                try:
+                    domain_data = await self._analyze_domain_intelligence(domain)
+                    if domain_data:
+                        company_data.update(domain_data)
+                        data_sources.append('domain_intelligence')
+                        logger.info(f"✅ Extracted domain intelligence for {domain}")
+                except Exception as e:
+                    logger.warning(f"Domain intelligence failed for {domain}: {e}")
             
-            # 4. COMPREHENSIVE WEB INTELLIGENCE (ENHANCED - Uses multiple professional sources)
-            logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
+            # 4. WEB INTELLIGENCE (Enhanced - with fallbacks for memory issues)
+            logger.info(f"🌐 Gathering web intelligence for {email}")
             
-            # Initialize web enrichment orchestrator
-            web_orchestrator = EnrichmentOrchestrator(self.user_id)
-            try:
-                await web_orchestrator.initialize()
-                
-                # Prepare contact data for web enrichment
-                contact_for_enrichment = {
-                    'email': email,
-                    'name': person_data.get('name', ''),
-                    'company': company_data.get('name', ''),
-                    'domain': domain
-                }
-                
-                # Get comprehensive web intelligence from multiple sources
-                web_results = await web_orchestrator.enrich_contact(
-                    contact_for_enrichment, 
-                    sources=['linkedin', 'twitter']  # Use both professional sources
-                )
-                
-                # Process LinkedIn intelligence
-                if 'linkedin' in web_results and web_results['linkedin'].successful:
-                    linkedin_data = web_results['linkedin'].data
-                    logger.info(f"✅ LinkedIn intelligence gathered for {email}")
+            # Skip heavy web scraping if memory is low (simple heuristic)
+            import psutil
+            memory_percent = psutil.virtual_memory().percent
+            
+            if memory_percent < 80:  # Only do web scraping if memory usage is reasonable
+                try:
+                    # Initialize web enrichment orchestrator with timeout
+                    web_orchestrator = EnrichmentOrchestrator(self.user_id)
+                    await asyncio.wait_for(web_orchestrator.initialize(), timeout=30)
                     
-                    # Enhanced person data from LinkedIn
-                    person_data.update({
-                        'name': linkedin_data.get('name', person_data.get('name', '')),
-                        'current_title': linkedin_data.get('position', ''),
-                        'company': linkedin_data.get('company', person_data.get('company', '')),
-                        'location': linkedin_data.get('location', ''),
-                        'headline': linkedin_data.get('headline', ''),
-                        'about': linkedin_data.get('about', ''),
-                        'experience': linkedin_data.get('experience', []),
-                        'education': linkedin_data.get('education', []),
-                        'skills': linkedin_data.get('skills', []),
-                        'connections': linkedin_data.get('connections', ''),
-                        'profile_url': linkedin_data.get('profile_url', '')
-                    })
+                    # Prepare contact data for web enrichment
+                    contact_for_enrichment = {
+                        'email': email,
+                        'name': person_data.get('name', ''),
+                        'company': company_data.get('name', ''),
+                        'domain': domain
+                    }
                     
-                    # Enhanced company data if available
-                    if linkedin_data.get('company'):
-                        company_data.update({
-                            'name': linkedin_data.get('company', company_data.get('name', ''))
+                    # Get web intelligence with timeout
+                    web_results = await asyncio.wait_for(
+                        web_orchestrator.enrich_contact(
+                            contact_for_enrichment, 
+                            sources=['linkedin', 'twitter']
+                        ),
+                        timeout=60  # 1 minute timeout per contact
+                    )
+                    
+                    # Process LinkedIn intelligence
+                    if 'linkedin' in web_results and web_results['linkedin'].successful:
+                        linkedin_data = web_results['linkedin'].data
+                        logger.info(f"✅ LinkedIn intelligence gathered for {email}")
+                        
+                        # Enhanced person data from LinkedIn
+                        person_data.update({
+                            'name': linkedin_data.get('name', person_data.get('name', '')),
+                            'current_title': linkedin_data.get('position', ''),
+                            'company': linkedin_data.get('company', person_data.get('company', '')),
+                            'location': linkedin_data.get('location', ''),
+                            'headline': linkedin_data.get('headline', ''),
+                            'about': linkedin_data.get('about', ''),
+                            'experience': linkedin_data.get('experience', []),
+                            'education': linkedin_data.get('education', []),
+                            'skills': linkedin_data.get('skills', []),
+                            'connections': linkedin_data.get('connections', ''),
+                            'profile_url': linkedin_data.get('profile_url', '')
                         })
+                        
+                        data_sources.append('linkedin_professional_intelligence')
                     
-                    data_sources.append('linkedin_professional_intelligence')
-                
-                # Process Twitter intelligence  
-                if 'twitter' in web_results and web_results['twitter'].successful:
-                    twitter_data = web_results['twitter'].data
-                    logger.info(f"✅ Twitter intelligence gathered for {email}")
+                    # Process Twitter intelligence  
+                    if 'twitter' in web_results and web_results['twitter'].successful:
+                        twitter_data = web_results['twitter'].data
+                        logger.info(f"✅ Twitter intelligence gathered for {email}")
+                        
+                        # Enhanced thought leadership data
+                        person_data.update({
+                            'twitter_handle': twitter_data.get('handle', ''),
+                            'twitter_bio': twitter_data.get('bio', ''),
+                            'follower_count': twitter_data.get('followers', ''),
+                            'recent_tweets': twitter_data.get('recent_tweets', []),
+                            'topics_discussed': twitter_data.get('topics', []),
+                            'engagement_level': twitter_data.get('engagement', ''),
+                            'thought_leadership_areas': twitter_data.get('expertise_areas', [])
+                        })
+                        
+                        data_sources.append('twitter_thought_leadership')
                     
-                    # Enhanced thought leadership data
-                    person_data.update({
-                        'twitter_handle': twitter_data.get('handle', ''),
-                        'twitter_bio': twitter_data.get('bio', ''),
-                        'follower_count': twitter_data.get('followers', ''),
-                        'recent_tweets': twitter_data.get('recent_tweets', []),
-                        'topics_discussed': twitter_data.get('topics', []),
-                        'engagement_level': twitter_data.get('engagement', ''),
-                        'thought_leadership_areas': twitter_data.get('expertise_areas', [])
-                    })
+                    await web_orchestrator.cleanup()
                     
-                    data_sources.append('twitter_thought_leadership')
-                
-            except Exception as e:
-                logger.error(f"❌ Web intelligence gathering failed for {email}: {str(e)}")
-            finally:
-                await web_orchestrator.cleanup()
+                except asyncio.TimeoutError:
+                    logger.warning(f"⏰ Web intelligence timed out for {email}")
+                except Exception as e:
+                    logger.error(f"❌ Web intelligence gathering failed for {email}: {str(e)}")
+            else:
+                logger.warning(f"⚠️ Skipping web scraping for {email} due to high memory usage ({memory_percent}%)")
             
-            # 5. CLAUDE SYNTHESIS (Final processing)
+            # 5. CLAUDE SYNTHESIS (Final processing) - Always runs with basic data
             if person_data or company_data:
-                synthesized_data = await self._claude_data_synthesis(
-                    email, person_data, company_data, data_sources
-                )
-                person_data = synthesized_data['person']
-                company_data = synthesized_data['company']
-                data_sources.append('claude_synthesis')
+                try:
+                    claude_result = await self._claude_data_synthesis(
+                        email, person_data, company_data, data_sources
+                    )
+                    if claude_result:
+                        synthesized_data = claude_result
+                    data_sources.append('claude_synthesis')
+                except Exception as e:
+                    logger.warning(f"Claude synthesis failed for {email}: {e}")
+                    # Use basic data if Claude fails
+                    synthesized_data.update({
+                        'person': person_data,
+                        'company': company_data
+                    })
+            else:
+                # Use whatever basic data we have
+                synthesized_data.update({
+                    'person': person_data,
+                    'company': company_data
+                })
             
             # Calculate confidence score
             confidence_score = self._calculate_confidence_score(person_data, company_data, data_sources)
@@ -257,8 +294,8 @@ class EnhancedContactEnricher:
             result = EnhancedEnrichmentResult(
                 email=email,
                 confidence_score=confidence_score,
-                person_data=person_data,
-                company_data=company_data,
+                person_data=synthesized_data.get('person', {}),
+                company_data=synthesized_data.get('company', {}),
                 relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
                 actionable_insights=synthesized_data.get('actionable_insights', {}),
                 data_sources=data_sources,
@@ -273,11 +310,11 @@ class EnhancedContactEnricher:
             return EnhancedEnrichmentResult(
                 email=email,
                 confidence_score=0.0,
-                person_data={},
-                company_data={},
-                relationship_intelligence={},
-                actionable_insights={},
-                data_sources=[],
+                person_data=synthesized_data.get('person', {}),
+                company_data=synthesized_data.get('company', {}),
+                relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
+                actionable_insights=synthesized_data.get('actionable_insights', {}),
+                data_sources=data_sources,
                 enrichment_timestamp=datetime.utcnow(),
                 error=str(e)
             )
@@ -1166,12 +1203,14 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
                 await web_orchestrator.cleanup()
             
             # 5. CLAUDE SYNTHESIS (Final processing)
+            synthesized_data = {'person': person_data, 'company': company_data, 'relationship_intelligence': {}, 'actionable_insights': {}}
+            
             if person_data or company_data:
-                synthesized_data = await self._claude_data_synthesis(
+                claude_result = await self._claude_data_synthesis(
                     email, person_data, company_data, data_sources
                 )
-                person_data = synthesized_data['person']
-                company_data = synthesized_data['company']
+                if claude_result:
+                    synthesized_data = claude_result
                 data_sources.append('claude_synthesis')
             
             # Calculate confidence score
@@ -1180,8 +1219,8 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
             result = EnhancedEnrichmentResult(
                 email=email,
                 confidence_score=confidence_score,
-                person_data=person_data,
-                company_data=company_data,
+                person_data=synthesized_data['person'],
+                company_data=synthesized_data['company'],
                 relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
                 actionable_insights=synthesized_data.get('actionable_insights', {}),
                 data_sources=data_sources,
@@ -1196,7 +1235,7 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
             return EnhancedEnrichmentResult(
                 email=email,
                 confidence_score=0.0,
-                person_data={},
+                person_data=cached_domain_data.copy(),  # At least return cached domain data
                 company_data=cached_domain_data.copy(),  # At least return cached domain data
                 relationship_intelligence={},
                 actionable_insights={},

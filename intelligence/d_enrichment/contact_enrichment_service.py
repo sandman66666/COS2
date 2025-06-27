@@ -8,6 +8,8 @@ import asyncio
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import json
+import gc
+import psutil
 
 from intelligence.d_enrichment.enhanced_enrichment import EnhancedContactEnricher
 from intelligence.d_enrichment.advanced_web_intelligence import AdvancedWebIntelligence, CompanyIntelligence
@@ -38,54 +40,168 @@ class ContactEnrichmentService:
     async def enrich_contacts_batch(self, contacts: List[Dict], user_emails: List[Dict] = None) -> Dict:
         """
         Enhanced batch enrichment with database-backed domain intelligence storage
+        Memory-optimized to prevent R14 errors with aggressive cleanup
         """
         logger.info(f"🚀 Starting ADVANCED batch enrichment for {len(contacts)} contacts")
         
-        # Group contacts by domain for efficient processing
-        domain_groups = {}
-        for contact in contacts:
-            email = contact.get('email', '')
-            if '@' in email:
-                domain = email.split('@')[1]
-                if domain not in domain_groups:
-                    domain_groups[domain] = []
-                domain_groups[domain].append(contact)
+        # Check initial memory status
+        initial_memory = psutil.virtual_memory().percent
+        logger.info(f"📊 Initial memory usage: {initial_memory}%")
         
-        logger.info(f"📊 Grouped into {len(domain_groups)} domains")
+        # Use smaller batches if memory is already high
+        if initial_memory > 60:
+            batch_size = 5  # Very small batches for memory conservation
+        elif initial_memory > 40:
+            batch_size = 10  # Medium batches
+        else:
+            batch_size = 20  # Normal batch size
         
-        # Process domains with database-backed intelligence
+        total_processed = 0
         enriched_results = {}
         
-        for domain, domain_contacts in domain_groups.items():
-            logger.info(f"🏢 Processing {len(domain_contacts)} contacts from {domain}")
+        # Split contacts into memory-safe batches
+        for batch_start in range(0, len(contacts), batch_size):
+            batch_end = min(batch_start + batch_size, len(contacts))
+            current_batch = contacts[batch_start:batch_end]
+            batch_num = (batch_start // batch_size) + 1
+            total_batches = (len(contacts) + batch_size - 1) // batch_size
             
-            # Get advanced company intelligence (database-backed)
-            company_intelligence = await self._get_domain_intelligence_from_db(domain)
+            # Check memory before each batch
+            current_memory = psutil.virtual_memory().percent
+            logger.info(f"🔄 Processing batch {batch_num}/{total_batches}: {len(current_batch)} contacts (Memory: {current_memory}%)")
             
-            # Enrich each contact with domain context
-            for contact in domain_contacts:
+            # Skip heavy processing if memory is too high
+            if current_memory > 85:
+                logger.warning(f"⚠️ High memory usage ({current_memory}%), using lightweight enrichment for batch {batch_num}")
+                # Use basic enrichment only
+                for contact in current_batch:
+                    try:
+                        basic_result = await self.basic_enricher.enrich_contact(contact, user_emails)
+                        enriched_results[contact['email']] = basic_result
+                        total_processed += 1
+                    except Exception as e:
+                        logger.error(f"Basic enrichment failed for {contact.get('email')}: {e}")
+                        # Store minimal result to avoid complete failure
+                        enriched_results[contact['email']] = {
+                            'email': contact['email'],
+                            'confidence_score': 0.0,
+                            'person_data': {},
+                            'company_data': {},
+                            'relationship_intelligence': {},
+                            'actionable_insights': {},
+                            'data_sources': ['fallback'],
+                            'enrichment_timestamp': datetime.utcnow(),
+                            'error': str(e)
+                        }
+                        total_processed += 1
+                
+                # Aggressive cleanup after high memory batch
+                gc.collect()
+                continue
+            
+            # Group contacts by domain for efficient processing within this batch
+            domain_groups = {}
+            for contact in current_batch:
+                email = contact.get('email', '')
+                if '@' in email:
+                    domain = email.split('@')[1]
+                    if domain not in domain_groups:
+                        domain_groups[domain] = []
+                    domain_groups[domain].append(contact)
+            
+            logger.info(f"📊 Batch {batch_num} grouped into {len(domain_groups)} domains")
+            
+            # Process domains with database-backed intelligence
+            for domain, domain_contacts in domain_groups.items():
+                logger.info(f"🏢 Processing {len(domain_contacts)} contacts from {domain}")
+                
+                # Check memory before processing each domain
+                domain_memory = psutil.virtual_memory().percent
+                if domain_memory > 80:
+                    logger.warning(f"⚠️ High memory ({domain_memory}%) - skipping advanced processing for {domain}")
+                    # Use basic enrichment for this domain
+                    for contact in domain_contacts:
+                        try:
+                            basic_result = await self.basic_enricher.enrich_contact(contact, user_emails)
+                            enriched_results[contact['email']] = basic_result
+                            total_processed += 1
+                        except Exception as e:
+                            logger.error(f"Basic enrichment failed for {contact.get('email')}: {e}")
+                    continue
+                
+                # Get advanced company intelligence (database-backed) with error handling
                 try:
-                    enriched_contact = await self._enrich_contact_with_intelligence(
-                        contact, company_intelligence, user_emails
-                    )
-                    enriched_results[contact['email']] = enriched_contact
-                    
-                    # Store enrichment result in database
-                    await self._store_enrichment_in_db(contact['email'], enriched_contact)
-                    
+                    company_intelligence = await self._get_domain_intelligence_from_db(domain)
                 except Exception as e:
-                    logger.error(f"Failed to enrich {contact.get('email')}: {e}")
-                    # Fallback to basic enrichment
-                    basic_result = await self.basic_enricher.enrich_contact(contact, user_emails)
-                    enriched_results[contact['email']] = basic_result
+                    logger.error(f"Failed to get domain intelligence for {domain}: {e}")
+                    company_intelligence = None
+                
+                # Enrich each contact with domain context
+                for contact in domain_contacts:
+                    try:
+                        enriched_contact = await self._enrich_contact_with_intelligence(
+                            contact, company_intelligence, user_emails
+                        )
+                        enriched_results[contact['email']] = enriched_contact
+                        total_processed += 1
+                        
+                        # Store enrichment result in database
+                        await self._store_enrichment_in_db(contact['email'], enriched_contact)
+                        
+                    except Exception as e:
+                        logger.error(f"Advanced enrichment failed for {contact.get('email')}: {e}")
+                        # Fallback to basic enrichment
+                        try:
+                            basic_result = await self.basic_enricher.enrich_contact(contact, user_emails)
+                            enriched_results[contact['email']] = basic_result
+                            total_processed += 1
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback enrichment also failed for {contact.get('email')}: {fallback_error}")
+                            # Store minimal result to avoid complete failure
+                            enriched_results[contact['email']] = {
+                                'email': contact['email'],
+                                'confidence_score': 0.0,
+                                'person_data': {},
+                                'company_data': {},
+                                'relationship_intelligence': {},
+                                'actionable_insights': {},
+                                'data_sources': ['error_fallback'],
+                                'enrichment_timestamp': datetime.utcnow(),
+                                'error': str(fallback_error)
+                            }
+                            total_processed += 1
+                
+                # Cleanup after each domain
+                gc.collect()
+            
+            # Memory cleanup after each batch
+            gc.collect()
+            
+            # Log memory status
+            batch_end_memory = psutil.virtual_memory().percent
+            logger.info(f"✅ Batch {batch_num} completed: {total_processed}/{len(contacts)} total processed (Memory: {batch_end_memory}%)")
+            
+            # If memory is getting too high, force more aggressive cleanup
+            if batch_end_memory > 75:
+                logger.warning(f"🧹 High memory usage detected ({batch_end_memory}%), forcing aggressive cleanup")
+                # Clear any cached data
+                self.domain_cache.clear()
+                gc.collect()
         
-        logger.info(f"✅ Advanced batch enrichment completed: {len(enriched_results)} contacts processed")
+        final_memory = psutil.virtual_memory().percent
+        logger.info(f"✅ Advanced batch enrichment completed: {total_processed} contacts processed")
+        logger.info(f"📊 Final memory usage: {final_memory}% (started at {initial_memory}%)")
         
         return {
             'enriched_contacts': enriched_results,
-            'total_processed': len(enriched_results),
-            'domains_analyzed': len(domain_groups),
-            'advanced_intelligence_used': True
+            'total_processed': total_processed,
+            'domains_analyzed': len(set(c.get('email', '').split('@')[1] for c in contacts if '@' in c.get('email', ''))),
+            'advanced_intelligence_used': True,
+            'memory_stats': {
+                'initial_memory': initial_memory,
+                'final_memory': final_memory,
+                'peak_memory_increase': final_memory - initial_memory
+            }
         }
     
     async def _get_domain_intelligence_from_db(self, domain: str) -> Optional[CompanyIntelligence]:
