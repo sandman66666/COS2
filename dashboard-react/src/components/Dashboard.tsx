@@ -5,7 +5,7 @@ import PipelineStep from './PipelineStep';
 import AuthButton from './AuthButton';
 import ProgressDisplay from './ProgressDisplay';
 import Modal from './Modal';
-import { pollJobStatus } from '../utils/api';
+import { pollJobStatus, cancelJob, JobStatus } from '../utils/api';
 
 const DashboardContainer = styled.div`
   max-width: 1200px;
@@ -49,33 +49,43 @@ const ControlsContainer = styled.div`
   margin-bottom: ${props => props.theme.spacing.xxl};
 `;
 
-const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' | 'danger' }>`
-  padding: ${props => props.theme.spacing.md} ${props => props.theme.spacing.xl};
+const ActionButton = styled.button.withConfig({
+  shouldForwardProp: (prop) => prop !== 'variant'
+})<{ variant?: 'primary' | 'secondary' | 'danger' }>`
+  padding: ${props => props.theme.spacing.md} ${props => props.theme.spacing.lg};
   background: ${props => {
     switch (props.variant) {
       case 'primary': return props.theme.colors.primary;
-      case 'danger': return props.theme.colors.error;
+      case 'danger': return '#dc3545';
       default: return props.theme.colors.surface;
     }
   }};
-  color: ${props => props.theme.colors.text};
-  border: 1px solid ${props => props.theme.colors.border};
+  color: ${props => 
+    props.variant === 'primary' || props.variant === 'danger' 
+      ? 'white' 
+      : props.theme.colors.text
+  };
+  border: 1px solid ${props => {
+    switch (props.variant) {
+      case 'primary': return props.theme.colors.primary;
+      case 'danger': return '#dc3545';
+      default: return props.theme.colors.border;
+    }
+  }};
   border-radius: ${props => props.theme.borderRadius};
   font-size: 1rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: ${props => props.theme.shadow};
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: ${props => {
       switch (props.variant) {
-        case 'primary': return props.theme.colors.primaryHover;
-        case 'danger': return '#6d5555';
-        default: return props.theme.colors.surfaceHover;
+        case 'primary': return props.theme.colors.primaryHover || '#0056b3';
+        case 'danger': return '#c82333';
+        default: return props.theme.colors.surfaceHover || '#f8f9fa';
       }
     }};
-    box-shadow: ${props => props.theme.shadowHover};
     transform: translateY(-2px);
   }
 
@@ -90,21 +100,16 @@ const LogoutButton = styled.button`
   position: absolute;
   top: 0;
   right: 0;
+  background: #dc3545;
+  color: white;
+  border: none;
   padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
-  background: ${props => props.theme.colors.error};
-  color: ${props => props.theme.colors.text};
-  border: 1px solid ${props => props.theme.colors.border};
   border-radius: ${props => props.theme.borderRadius};
-  font-size: 0.9rem;
-  font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: ${props => props.theme.shadow};
-
+  font-size: 0.9rem;
+  
   &:hover {
-    background: #6d5555;
-    box-shadow: ${props => props.theme.shadowHover};
-    transform: translateY(-2px);
+    background: #c82333;
   }
 `;
 
@@ -131,47 +136,45 @@ const ConfigModal = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: ${props => props.theme.spacing.lg};
 `;
 
 const ConfigContainer = styled.div`
-  background: ${props => props.theme.colors.background};
-  border: 1px solid ${props => props.theme.colors.border};
+  background: ${props => props.theme.colors.surface};
   border-radius: ${props => props.theme.borderRadius};
-  box-shadow: ${props => props.theme.shadowHover};
-  width: 100%;
-  max-width: 500px;
   padding: ${props => props.theme.spacing.xl};
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
 `;
 
 const ConfigTitle = styled.h3`
   color: ${props => props.theme.colors.text};
   margin-bottom: ${props => props.theme.spacing.lg};
-  font-size: 1.2rem;
 `;
 
 const ConfigField = styled.div`
-  margin-bottom: ${props => props.theme.spacing.md};
+  margin-bottom: ${props => props.theme.spacing.lg};
 `;
 
 const ConfigLabel = styled.label`
   display: block;
   color: ${props => props.theme.colors.text};
-  margin-bottom: ${props => props.theme.spacing.xs};
   font-weight: 500;
+  margin-bottom: ${props => props.theme.spacing.sm};
 `;
 
 const ConfigInput = styled.input`
   width: 100%;
-  padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.md};
+  padding: ${props => props.theme.spacing.sm};
   border: 1px solid ${props => props.theme.colors.border};
   border-radius: ${props => props.theme.borderRadius};
-  background: ${props => props.theme.colors.surface};
+  background: ${props => props.theme.colors.background};
   color: ${props => props.theme.colors.text};
   font-size: 1rem;
   
@@ -183,74 +186,64 @@ const ConfigInput = styled.input`
 
 const ConfigActions = styled.div`
   display: flex;
-  gap: ${props => props.theme.spacing.sm};
+  gap: ${props => props.theme.spacing.md};
   justify-content: flex-end;
   margin-top: ${props => props.theme.spacing.lg};
 `;
 
-const ConfigButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
+const ConfigButton = styled.button.withConfig({
+  shouldForwardProp: (prop) => prop !== 'variant'
+})<{ variant?: 'primary' }>`
   padding: ${props => props.theme.spacing.sm} ${props => props.theme.spacing.lg};
-  border: 1px solid ${props => props.theme.colors.border};
-  border-radius: ${props => props.theme.borderRadius};
-  font-size: 0.9rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  
   background: ${props => 
     props.variant === 'primary' 
       ? props.theme.colors.primary 
       : props.theme.colors.surface
   };
-  color: ${props => props.theme.colors.text};
-
+  color: ${props => 
+    props.variant === 'primary' 
+      ? 'white' 
+      : props.theme.colors.text
+  };
+  border: 1px solid ${props => 
+    props.variant === 'primary' 
+      ? props.theme.colors.primary 
+      : props.theme.colors.border
+  };
+  border-radius: ${props => props.theme.borderRadius};
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
   &:hover {
     background: ${props => 
       props.variant === 'primary' 
-        ? props.theme.colors.primaryHover 
-        : props.theme.colors.surfaceHover
+        ? props.theme.colors.primaryHover || '#0056b3'
+        : props.theme.colors.surfaceHover || '#f8f9fa'
     };
   }
 `;
 
 const DangerZone = styled.div`
-  margin-top: ${props => props.theme.spacing.xl};
-  padding: ${props => props.theme.spacing.lg};
-  border: 2px dashed #dc3545;
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
   border-radius: ${props => props.theme.borderRadius};
-  background: rgba(220, 53, 69, 0.1);
+  padding: ${props => props.theme.spacing.lg};
   text-align: center;
 `;
 
-const DangerTitle = styled.h4`
-  color: #dc3545;
+const DangerTitle = styled.h3`
+  color: #856404;
   margin-bottom: ${props => props.theme.spacing.md};
-  font-size: 1rem;
-  font-weight: 600;
 `;
 
-const DangerButton = styled.button`
-  padding: ${props => props.theme.spacing.md} ${props => props.theme.spacing.xl};
+const DangerButton = styled(ActionButton)`
   background: #dc3545;
+  border-color: #dc3545;
   color: white;
-  border: none;
-  border-radius: ${props => props.theme.borderRadius};
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: ${props => props.theme.shadow};
-
-  &:hover {
+  
+  &:hover:not(:disabled) {
     background: #c82333;
-    box-shadow: ${props => props.theme.shadowHover};
-    transform: translateY(-2px);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
+    border-color: #bd2130;
   }
 `;
 
@@ -348,7 +341,7 @@ const PIPELINE_STEPS: StepData[] = [
     id: 'insights',
     name: 'Generate Insights',
     description: 'Create strategic intelligence and recommendations',
-    endpoint: '/api/intelligence/generate',
+    endpoint: '/api/intelligence/strategic-analysis',
     method: 'POST'
   }
 ];
@@ -364,6 +357,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
   const [selectedModal, setSelectedModal] = useState<string | null>(null);
   const [stepStatuses, setStepStatuses] = useState<Record<string, string>>({});
   const [stepProgress, setStepProgress] = useState<Record<string, number>>({});
+  const [stepJobIds, setStepJobIds] = useState<Record<string, string>>({});
+  const [stepJobStatuses, setStepJobStatuses] = useState<Record<string, JobStatus>>({});
   const [showConfigModal, setShowConfigModal] = useState<string | null>(null);
   const [stepConfigs, setStepConfigs] = useState<Record<string, any>>({
     emails: { days: 365 }, // Default to 1 year for comprehensive contact extraction
@@ -382,6 +377,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
     } catch (error) {
       console.error('Auth check failed:', error);
       setIsAuthenticated(false);
+    }
+  };
+
+  const stopStep = async (stepId: string) => {
+    const jobId = stepJobIds[stepId];
+    if (!jobId) {
+      console.warn(`No job ID found for step ${stepId}`);
+      return;
+    }
+
+    console.log(`🛑 Stopping step ${stepId} (job ${jobId})`);
+    
+    // Immediately update UI to show stopping state
+    setStepStatuses(prev => ({ ...prev, [stepId]: 'stopping' }));
+    
+    try {
+      const success = await cancelJob(jobId);
+      if (success) {
+        console.log(`✅ Stop request sent for step ${stepId}`);
+        // The polling will pick up the stopped status
+      } else {
+        console.error(`❌ Failed to stop step ${stepId}`);
+        // Revert status if stop failed
+        setStepStatuses(prev => ({ ...prev, [stepId]: 'running' }));
+      }
+    } catch (error) {
+      console.error(`❌ Error stopping step ${stepId}:`, error);
+      // Revert status if stop failed
+      setStepStatuses(prev => ({ ...prev, [stepId]: 'running' }));
     }
   };
 
@@ -419,20 +443,55 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
       if (response.data.job_id && response.data.status_url) {
         console.log(`Background job started: ${response.data.job_id}`);
         
-        // Poll for job completion
-        const result = await pollJobStatus(
-          response.data.job_id,
-          response.data.status_url,
-          (progress) => {
-            setStepProgress(prev => ({ ...prev, [stepId]: progress }));
-          }
-        );
+        // Store job ID for stop functionality
+        setStepJobIds(prev => ({ ...prev, [stepId]: response.data.job_id }));
         
-        setPipelineState(prev => ({
-          ...prev,
-          stepResults: { ...prev.stepResults, [stepId]: result }
-        }));
-        setStepStatuses(prev => ({ ...prev, [stepId]: 'completed' }));
+        // Poll for job completion with enhanced progress tracking
+        try {
+          const result = await pollJobStatus(
+            response.data.job_id,
+            response.data.status_url,
+            (progress, jobStatus) => {
+              setStepProgress(prev => ({ ...prev, [stepId]: progress }));
+              if (jobStatus) {
+                setStepJobStatuses(prev => ({ ...prev, [stepId]: jobStatus }));
+                // Update status based on job status
+                if (jobStatus.status === 'stopping') {
+                  setStepStatuses(prev => ({ ...prev, [stepId]: 'stopping' }));
+                } else if (jobStatus.status === 'stopped') {
+                  setStepStatuses(prev => ({ ...prev, [stepId]: 'stopped' }));
+                }
+              }
+            }
+          );
+          
+          if (result.stopped) {
+            // Job was stopped by user
+            setStepStatuses(prev => ({ ...prev, [stepId]: 'stopped' }));
+            setPipelineState(prev => ({
+              ...prev,
+              stepResults: { ...prev.stepResults, [stepId]: result }
+            }));
+          } else {
+            // Job completed normally
+            setPipelineState(prev => ({
+              ...prev,
+              stepResults: { ...prev.stepResults, [stepId]: result }
+            }));
+            setStepStatuses(prev => ({ ...prev, [stepId]: 'completed' }));
+          }
+        } catch (error) {
+          console.error(`Step ${stepId} failed:`, error);
+          setStepStatuses(prev => ({ ...prev, [stepId]: 'error' }));
+          setStepProgress(prev => ({ ...prev, [stepId]: 0 }));
+        } finally {
+          // Clean up job tracking
+          setStepJobIds(prev => {
+            const newJobIds = { ...prev };
+            delete newJobIds[stepId];
+            return newJobIds;
+          });
+        }
       } else {
         // Synchronous response
         setPipelineState(prev => ({
@@ -446,6 +505,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
       console.error(`Step ${stepId} failed:`, error);
       setStepStatuses(prev => ({ ...prev, [stepId]: 'error' }));
       setStepProgress(prev => ({ ...prev, [stepId]: 0 }));
+    }
+  };
+
+  const stopAllJobs = async () => {
+    console.log('🛑 Stopping all running jobs...');
+    const runningSteps = Object.entries(stepStatuses)
+      .filter(([_, status]) => status === 'running')
+      .map(([stepId, _]) => stepId);
+    
+    for (const stepId of runningSteps) {
+      await stopStep(stepId);
     }
   };
 
@@ -480,6 +550,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
         });
         setStepStatuses({});
         setStepProgress({});
+        setStepJobIds({});
+        setStepJobStatuses({});
         // Force logout to re-authenticate
         onAuthChange(false);
       } else {
@@ -504,6 +576,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
     for (let i = 0; i < PIPELINE_STEPS.length; i++) {
       const step = PIPELINE_STEPS[i];
       setPipelineState(prev => ({ ...prev, currentStep: i }));
+      
+      // Check if should stop pipeline
+      if (Object.values(stepStatuses).some(status => status === 'stopped')) {
+        console.log('Pipeline stopped by user');
+        break;
+      }
+      
       await executeStep(step.id);
     }
     
@@ -518,11 +597,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
     });
     setStepStatuses({});
     setStepProgress({});
+    setStepJobIds({});
+    setStepJobStatuses({});
   };
 
   const handleLogout = async () => {
     try {
       console.log('Logging out...');
+      
+      // Stop any running jobs first
+      await stopAllJobs();
       
       // Immediately update local state to show login page
       onAuthChange(false);
@@ -536,6 +620,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
       onAuthChange(false);
     }
   };
+
+  const hasRunningJobs = Object.values(stepStatuses).some(status => 
+    status === 'running' || status === 'stopping'
+  );
 
   return (
     <DashboardContainer>
@@ -566,10 +654,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
             status={stepStatuses[step.id] || 'ready'}
             progress={stepProgress[step.id] || 0}
             result={pipelineState.stepResults[step.id]}
+            jobStatus={stepJobStatuses[step.id]}
             onExecute={() => executeStep(step.id)}
+            onStop={() => stopStep(step.id)}
             onInspect={() => setSelectedModal(step.id)}
             onConfigure={['emails', 'extract'].includes(step.id) ? () => openStepConfig(step.id) : undefined}
-            disabled={!isAuthenticated || pipelineState.isRunning}
+            disabled={!isAuthenticated || (pipelineState.isRunning && step.id !== PIPELINE_STEPS[pipelineState.currentStep]?.id)}
             config={stepConfigs[step.id]}
           />
         ))}
@@ -579,14 +669,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
         <ActionButton
           variant="primary"
           onClick={runFullPipeline}
-          disabled={!isAuthenticated || pipelineState.isRunning}
+          disabled={!isAuthenticated || pipelineState.isRunning || hasRunningJobs}
         >
           {pipelineState.isRunning ? 'Running Pipeline...' : 'Run Full Pipeline'}
         </ActionButton>
         
+        {hasRunningJobs && (
+          <ActionButton
+            variant="danger"
+            onClick={stopAllJobs}
+            title="Stop all running processes"
+          >
+            ⏹️ Stop All
+          </ActionButton>
+        )}
+        
         <ActionButton
           onClick={resetPipeline}
-          disabled={pipelineState.isRunning}
+          disabled={pipelineState.isRunning || hasRunningJobs}
         >
           Reset Pipeline
         </ActionButton>
@@ -599,7 +699,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
         </p>
         <DangerButton
           onClick={() => setShowFlushConfirm(true)}
-          disabled={pipelineState.isRunning}
+          disabled={pipelineState.isRunning || hasRunningJobs}
         >
           🗑️ Flush Database
         </DangerButton>
@@ -615,31 +715,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
       )}
 
       {showFlushConfirm && (
-        <ConfirmDialog onClick={(e) => e.target === e.currentTarget && setShowFlushConfirm(false)}>
-          <ConfirmContainer>
-            <ConfirmTitle>⚠️ Confirm Database Flush</ConfirmTitle>
-            <ConfirmText>
-              <strong>This will permanently delete ALL data:</strong>
-              <br />
-              • All contacts and email data
-              <br />
-              • Knowledge trees and analysis results
-              <br />
-              • Cache and session data
-              <br />
-              <br />
-              This action cannot be undone. Are you sure?
-            </ConfirmText>
-            <ConfirmActions>
+        <ConfigModal onClick={(e) => e.target === e.currentTarget && setShowFlushConfirm(false)}>
+          <ConfigContainer>
+            <ConfigTitle>⚠️ Confirm Database Flush</ConfigTitle>
+            <p style={{ marginBottom: '20px', color: '#666' }}>
+              This will permanently delete all your data including:
+              <br />• All contacts and enrichment data
+              <br />• All synced emails
+              <br />• Knowledge trees and analysis results
+              <br /><br />
+              <strong>This action cannot be undone!</strong>
+            </p>
+            <ConfigActions>
               <ConfigButton onClick={() => setShowFlushConfirm(false)}>
                 Cancel
               </ConfigButton>
-              <DangerButton onClick={flushDatabase}>
-                Yes, Flush Everything
-              </DangerButton>
-            </ConfirmActions>
-          </ConfirmContainer>
-        </ConfirmDialog>
+              <ConfigButton variant="primary" onClick={flushDatabase}>
+                🗑️ Flush Database
+              </ConfigButton>
+            </ConfigActions>
+          </ConfigContainer>
+        </ConfigModal>
       )}
 
       {showConfigModal && (

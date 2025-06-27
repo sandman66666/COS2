@@ -611,65 +611,57 @@ def sync_emails():
         
         def background_email_sync():
             try:
-                # Import Gmail client and make it work synchronously
-                import sys
-                import os
-                sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+                # Update to show more detailed progress
+                update_job_progress(job_id, 0, 'Initializing email sync...', {
+                    'sync_phase': 'initialization',
+                    'days_to_sync': days
+                })
                 
-                from datetime import datetime, timedelta
-                from google.oauth2.credentials import Credentials
-                from googleapiclient.discovery import build
-                import time
-                import base64
-                import email
-                import re
-                import gc  # For garbage collection
+                # Check for stop signal early
+                if should_stop_job(job_id):
+                    stop_job_gracefully(job_id, 'Stopped during initialization', 
+                        resume_info={'can_resume': True, 'next_step': 'initialization'})
+                    return
                 
-                # Set maximum processing limits to prevent timeouts
-                MAX_EMAILS_PER_CONTACT = 100  # Limit emails per contact
-                MAX_TOTAL_RUNTIME = 1800  # 30 minutes max runtime
-                CHUNK_SIZE = 20  # Process emails in chunks
-                
-                start_time = time.time()
-                
-                # Update status to connecting
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'connecting'
-                        background_jobs[job_id]['message'] = 'Connecting to database and Gmail...'
-                
+                # Get user from database
                 storage_manager = get_storage_manager_sync()
                 user = storage_manager.get_user_by_email(user_email)
                 if not user:
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'failed'
-                            background_jobs[job_id]['message'] = 'User not found in database'
+                    complete_job(job_id, False, 'User not found in database')
                     return
                 
                 user_id = user['id']
                 
-                # Get ALL contacts from Step 1 (no trust tier filtering)
+                # Get target contacts for filtering
+                update_job_progress(job_id, 5, 'Loading contact list for filtering...', {
+                    'sync_phase': 'loading_contacts'
+                })
+                
                 target_contacts = set()
-                contacts, _ = storage_manager.get_contacts(user_id, limit=10000)  # Get all contacts
-                for contact in contacts:
-                    target_contacts.add(contact['email'].lower())
+                try:
+                    contacts, _ = storage_manager.get_contacts(user_id, limit=2000)
+                    target_contacts = {contact['email'].lower() for contact in contacts if contact.get('email')}
+                    logger.info(f"Loaded {len(target_contacts)} contacts for email filtering")
+                except Exception as e:
+                    logger.warning(f"Could not load contacts for filtering: {e}")
+                    target_contacts = set()
                 
                 if not target_contacts:
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'failed'
-                            background_jobs[job_id]['message'] = 'No contacts found. Please run Step 1 (Extract Official Contacts) first.'
+                    complete_job(job_id, False, 'No contacts found for email sync filtering')
                     return
                 
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['message'] = f'Found {len(target_contacts)} contacts to sync emails from (max {MAX_EMAILS_PER_CONTACT} emails per contact)'
-                        background_jobs[job_id]['total_contacts'] = len(target_contacts)
+                # Check for stop signal after loading contacts
+                if should_stop_job(job_id):
+                    stop_job_gracefully(job_id, 'Stopped after loading contacts', 
+                        partial_result={'contacts_loaded': len(target_contacts)},
+                        resume_info={'can_resume': True, 'next_step': 'gmail_connection'})
+                    return
                 
-                logger.info(f"Syncing emails from {len(target_contacts)} discovered contacts for past {days} days (resource-managed)")
+                # Create credentials object from session data
+                update_job_progress(job_id, 10, 'Connecting to Gmail API...', {
+                    'sync_phase': 'gmail_connection'
+                })
                 
-                # Create credentials object
                 try:
                     credentials = Credentials(
                         token=oauth_credentials.get('access_token'),
@@ -679,25 +671,22 @@ def sync_emails():
                         client_secret=oauth_credentials.get('client_secret'),
                         scopes=oauth_credentials.get('scopes', [])
                     )
+                    
+                    if oauth_credentials.get('expiry'):
+                        credentials.expiry = datetime.fromtimestamp(oauth_credentials['expiry'])
+                        
                 except Exception as cred_error:
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'failed'
-                            background_jobs[job_id]['message'] = f'Gmail credentials are invalid or expired: {str(cred_error)}'
+                    complete_job(job_id, False, f'Invalid OAuth credentials: {str(cred_error)}')
                     return
                 
                 # Build Gmail service
                 try:
                     service = build('gmail', 'v1', credentials=credentials)
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'processing'
-                            background_jobs[job_id]['message'] = 'Connected to Gmail, starting email sync...'
+                    update_job_progress(job_id, 15, 'Connected to Gmail, starting email sync...', {
+                        'sync_phase': 'processing_emails'
+                    })
                 except Exception as service_error:
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'failed'
-                            background_jobs[job_id]['message'] = f'Failed to connect to Gmail API: {str(service_error)}'
+                    complete_job(job_id, False, f'Failed to connect to Gmail API: {str(service_error)}')
                     return
                 
                 # Calculate date range
@@ -715,26 +704,56 @@ def sync_emails():
                 logger.info(f"Searching for emails from discovered contacts since {cutoff_date.strftime('%Y-%m-%d')} (resource-managed)")
                 
                 for i, contact_email in enumerate(target_contacts_list):
+                    # Check for stop signal before processing each contact
+                    if should_stop_job(job_id):
+                        stop_job_gracefully(job_id,
+                            f'Stopped during email processing. Processed {contacts_processed} of {len(target_contacts_list)} contacts.',
+                            partial_result={
+                                'emails_synced': new_emails,
+                                'contacts_processed': contacts_processed,
+                                'contacts_skipped': skipped_contacts
+                            },
+                            resume_info={
+                                'can_resume': True,
+                                'next_step': 'email_processing',
+                                'contacts_remaining': len(target_contacts_list) - contacts_processed,
+                                'last_contact_index': i
+                            }
+                        )
+                        return
+                    
                     try:
                         # Check runtime limit
                         if time.time() - start_time > MAX_TOTAL_RUNTIME:
                             logger.warning(f"Reached maximum runtime ({MAX_TOTAL_RUNTIME}s), stopping at contact {contacts_processed}")
-                            with jobs_lock:
-                                if job_id in background_jobs:
-                                    background_jobs[job_id]['message'] = f'Reached time limit at contact {contacts_processed}/{len(target_contacts_list)} - Synced {new_emails} emails'
+                            stop_job_gracefully(job_id,
+                                f'Reached time limit at contact {contacts_processed}/{len(target_contacts_list)} - Synced {new_emails} emails',
+                                partial_result={
+                                    'emails_synced': new_emails,
+                                    'contacts_processed': contacts_processed,
+                                    'reason': 'time_limit_reached'
+                                },
+                                resume_info={
+                                    'can_resume': True,
+                                    'next_step': 'email_processing',
+                                    'contacts_remaining': len(target_contacts_list) - contacts_processed
+                                }
+                            )
                             break
                         
                         contacts_processed += 1
                         
-                        # Update progress every 3 contacts
+                        # Update progress every 3 contacts with detailed info
                         if contacts_processed % 3 == 0:
-                            progress = int((contacts_processed / len(target_contacts_list)) * 100)
-                            with jobs_lock:
-                                if job_id in background_jobs:
-                                    background_jobs[job_id]['progress'] = progress
-                                    background_jobs[job_id]['contacts_processed'] = contacts_processed
-                                    background_jobs[job_id]['emails_synced'] = new_emails
-                                    background_jobs[job_id]['message'] = f'Processing contact {contacts_processed}/{len(target_contacts_list)}: {contact_email} - Found {new_emails} emails so far'
+                            progress = 15 + int((contacts_processed / len(target_contacts_list)) * 75)  # 15-90% for processing
+                            update_job_progress(job_id, progress, 
+                                f'Processing contact {contacts_processed}/{len(target_contacts_list)}: {contact_email}', {
+                                'sync_phase': 'processing_emails',
+                                'current_contact': contact_email,
+                                'emails_found': new_emails,
+                                'contacts_completed': contacts_processed,
+                                'contacts_total': len(target_contacts_list)
+                            })
                         
                         # Build query for this specific contact with limits
                         query = f'(from:{contact_email} OR to:{contact_email}) after:{cutoff_date.strftime("%Y/%m/%d")}'
@@ -884,32 +903,21 @@ def sync_emails():
                         continue
                 
                 # Final status update with comprehensive results
-                final_message = f'Email sync complete! Synced {new_emails} emails from {contacts_processed} contacts'
+                final_message = f"Successfully synced {new_emails} emails from {contacts_processed} contacts"
                 if skipped_contacts > 0:
                     final_message += f' ({skipped_contacts} contacts skipped due to errors)'
                 if time.time() - start_time > MAX_TOTAL_RUNTIME * 0.9:
                     final_message += ' (stopped due to time limit)'
                 
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'completed'
-                        background_jobs[job_id]['progress'] = 100
-                        background_jobs[job_id]['message'] = final_message
-                        background_jobs[job_id]['emails_synced'] = new_emails
-                        background_jobs[job_id]['contacts_processed'] = contacts_processed
-                        background_jobs[job_id]['contacts_skipped'] = skipped_contacts
-                        background_jobs[job_id]['runtime_seconds'] = int(time.time() - start_time)
-                        background_jobs[job_id]['completed_at'] = time.time()
-                        # Structure the result properly for React Modal
-                        background_jobs[job_id]['result'] = {
-                            'success': True,
-                            'emails': [],  # Will be populated by inspect endpoint
-                            'total_emails': new_emails,
-                            'contacts_processed': contacts_processed,
-                            'contacts_skipped': skipped_contacts,
-                            'runtime_seconds': int(time.time() - start_time),
-                            'sync_method': 'resource_managed_background'
-                        }
+                complete_job(job_id, True, final_message, result={
+                    'success': True,
+                    'emails': [],  # Will be populated by inspect endpoint
+                    'total_emails': new_emails,
+                    'contacts_processed': contacts_processed,
+                    'contacts_skipped': skipped_contacts,
+                    'runtime_seconds': int(time.time() - start_time),
+                    'sync_method': 'resource_managed_background_with_stopping'
+                }, resume_info={'can_resume': False, 'reason': 'completed_successfully'})
                 
                 logger.info(f"Email sync completed for user {user_email} using resource-managed approach", 
                            processed=processed_count, new=new_emails, updated=updated_emails, 
@@ -918,12 +926,8 @@ def sync_emails():
                 
             except Exception as e:
                 logger.error(f"Background email sync job {job_id} failed: {str(e)}")
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'failed'
-                        background_jobs[job_id]['message'] = f'Email sync failed: {str(e)}'
-                        background_jobs[job_id]['error_details'] = str(e)
-        
+                complete_job(job_id, False, f'Email sync failed: {str(e)}')
+
         # Start background thread
         import threading
         thread = threading.Thread(target=background_email_sync)
@@ -1251,18 +1255,12 @@ def enrich_contacts():
         def background_contact_enrichment():
             try:
                 # Update status to connecting
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'connecting'
-                        background_jobs[job_id]['message'] = 'Connecting to database...'
+                update_job_progress(job_id, 0, 'Connecting to database...')
                 
                 storage_manager = get_storage_manager_sync()
                 user = storage_manager.get_user_by_email(user_email)
                 if not user:
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'failed'
-                            background_jobs[job_id]['message'] = 'User not found in database'
+                    complete_job(job_id, False, 'User not found in database')
                     return
                 
                 user_id = user['id']
@@ -1274,62 +1272,64 @@ def enrich_contacts():
                 contacts_to_enrich = []
                 already_enriched_count = 0
                 
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'filtering'
-                        background_jobs[job_id]['message'] = f'Filtering {len(all_contacts)} contacts for enrichment...'
+                update_job_progress(job_id, 5, f'Filtering {len(all_contacts)} contacts for enrichment...', {
+                    'total_contacts_found': len(all_contacts),
+                    'filtering_progress': 'checking_enrichment_status'
+                })
                 
                 for contact in all_contacts:
-                    try:
-                        # Check if contact already has enrichment data
-                        metadata = contact.get('metadata')
-                        if isinstance(metadata, str):
-                            try:
-                                metadata = json.loads(metadata)
-                            except:
-                                metadata = {}
-                        elif not isinstance(metadata, dict):
+                    # Check for stop signal during filtering
+                    if should_stop_job(job_id):
+                        stop_job_gracefully(job_id, 
+                            f'Stopped during filtering. Processed {len(contacts_to_enrich)} of {len(all_contacts)} contacts.',
+                            partial_result={'filtered_contacts': len(contacts_to_enrich), 'already_enriched': already_enriched_count},
+                            resume_info={'can_resume': True, 'next_step': 'filtering', 'progress_checkpoint': len(contacts_to_enrich)}
+                        )
+                        return
+                    
+                    email = contact.get('email', '').strip().lower()
+                    if not email:
+                        continue
+                    
+                    # Check if already enriched by looking for comprehensive enrichment data
+                    metadata = contact.get('metadata', {})
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except:
                             metadata = {}
-                        else:
-                            metadata = metadata or {}
-                        
-                        # Skip if already enriched with good confidence
-                        enrichment_data = metadata.get('enrichment_data', {})
-                        if enrichment_data and enrichment_data.get('confidence_score', 0) > 0.3:
-                            already_enriched_count += 1
-                            logger.info(f"⏭️ Skipping {contact['email']} - already enriched (confidence: {enrichment_data.get('confidence_score', 0)})")
-                            continue
-                        
+                    
+                    enrichment_data = metadata.get('enrichment_data', {})
+                    has_enrichment = bool(
+                        enrichment_data.get('person_data') or 
+                        enrichment_data.get('company_data') or
+                        enrichment_data.get('confidence_score', 0) > 0
+                    )
+                    
+                    if has_enrichment:
+                        already_enriched_count += 1
+                    else:
                         contacts_to_enrich.append(contact)
-                        
-                        # Stop when we have enough to process
-                        if len(contacts_to_enrich) >= limit:
-                            break
-                            
-                    except Exception as e:
-                        logger.error(f"Error checking enrichment status for {contact.get('email', 'unknown')}: {e}")
-                        contacts_to_enrich.append(contact)  # Include if we can't determine status
+                    
+                    # Limit to requested number
+                    if len(contacts_to_enrich) >= limit:
+                        break
                 
-                contacts = contacts_to_enrich
+                contacts = contacts_to_enrich[:limit]
                 
                 if not contacts:
-                    with jobs_lock:
-                        if job_id in background_jobs:
-                            background_jobs[job_id]['status'] = 'completed'
-                            background_jobs[job_id]['progress'] = 100
-                            background_jobs[job_id]['message'] = f'No contacts need enrichment. {already_enriched_count} contacts already enriched.'
-                            background_jobs[job_id]['already_enriched'] = already_enriched_count
-                            background_jobs[job_id]['contacts_enriched'] = 0
-                            background_jobs[job_id]['contacts_processed'] = 0
-                            background_jobs[job_id]['completed_at'] = time.time()
+                    complete_job(job_id, True, 
+                        f'No contacts need enrichment. {already_enriched_count} contacts already enriched.',
+                        result={'already_enriched': already_enriched_count, 'newly_enriched': 0},
+                        resume_info={'can_resume': False, 'reason': 'all_contacts_already_enriched'}
+                    )
                     return
                 
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'processing'
-                        background_jobs[job_id]['message'] = f'Starting enrichment for {len(contacts)} contacts...'
-                        background_jobs[job_id]['total_contacts'] = len(contacts)
-                        background_jobs[job_id]['already_enriched'] = already_enriched_count
+                update_job_progress(job_id, 10, f'Starting enrichment for {len(contacts)} contacts...', {
+                    'total_contacts': len(contacts),
+                    'already_enriched': already_enriched_count,
+                    'enrichment_phase': 'initializing'
+                })
                 
                 # Import the advanced contact enrichment service
                 import sys
@@ -1338,95 +1338,99 @@ def enrich_contacts():
                 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
                 
                 from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
-                
-                # Use the advanced enrichment service with multi-strategy web intelligence
+
                 async def run_advanced_enrichment():
                     enrichment_service = ContactEnrichmentService(user_id, storage_manager)
                     await enrichment_service.initialize()
                     
-                    # Get user emails for enrichment context
-                    user_emails = []
-                    try:
-                        user_emails = storage_manager.get_emails_for_user(user_id, limit=500)
-                        logger.info(f"Retrieved {len(user_emails)} user emails for enrichment context")
-                    except Exception as e:
-                        logger.warning(f"Could not get user emails for enrichment: {e}")
+                    # Update progress for initialization complete
+                    update_job_progress(job_id, 15, 'Enrichment service initialized. Starting batch processing...', {
+                        'enrichment_phase': 'batch_processing_started'
+                    })
                     
-                    # Run enhanced enrichment
-                    enriched_data = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
-                    enriched_contacts = enriched_data.get('enriched_contacts', {})
+                    # Check for stop signal before starting enrichment
+                    if should_stop_job(job_id):
+                        stop_job_gracefully(job_id,
+                            'Stopped before enrichment processing. Service initialized successfully.',
+                            resume_info={'can_resume': True, 'next_step': 'enrichment', 'contacts_remaining': len(contacts)}
+                        )
+                        return {'stopped': True}
                     
-                    # Store enrichment results in database
+                    # Get user emails for context analysis
+                    user_emails, _ = storage_manager.get_emails(user_id, limit=1000)
+                    
+                    # Run enhanced batch enrichment with stop checking
+                    enrichment_result = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
+                    
+                    # Process and store results
                     successful_enrichments = 0
-                    for i, (email, enrichment_result) in enumerate(enriched_contacts.items()):
+                    enriched_contacts = enrichment_result.get('enriched_contacts', [])
+                    
+                    update_job_progress(job_id, 85, f'Storing enrichment results for {len(enriched_contacts)} contacts...', {
+                        'enrichment_phase': 'storing_results',
+                        'enriched_contacts_count': len(enriched_contacts)
+                    })
+                    
+                    for i, enriched_contact in enumerate(enriched_contacts):
+                        # Check for stop signal during result storage
+                        if should_stop_job(job_id):
+                            stop_job_gracefully(job_id,
+                                f'Stopped while storing results. Processed {i} of {len(enriched_contacts)} enrichment results.',
+                                partial_result={
+                                    'enriched_contacts': i,
+                                    'total_contacts': len(contacts),
+                                    'success_rate': (i / len(contacts)) * 100 if len(contacts) > 0 else 0
+                                },
+                                resume_info={
+                                    'can_resume': True, 
+                                    'next_step': 'storing_results',
+                                    'results_stored': i,
+                                    'results_remaining': len(enriched_contacts) - i
+                                }
+                            )
+                            return {'stopped': True, 'partial_success': i}
+                        
                         try:
-                            # Update progress every few contacts
-                            if i % 5 == 0:
-                                progress = int((i / len(enriched_contacts)) * 90) + 10  # Reserve 10% for completion
-                                with jobs_lock:
-                                    if job_id in background_jobs:
-                                        background_jobs[job_id]['progress'] = progress
-                                        background_jobs[job_id]['contacts_processed'] = i
-                                        background_jobs[job_id]['contacts_enriched'] = successful_enrichments
-                                        background_jobs[job_id]['message'] = f'Storing enrichment {i+1}/{len(enriched_contacts)}: {email}'
-                            
-                            if enrichment_result.get('confidence_score', 0) > 0.3:
-                                # Format enrichment data for database storage
+                            email = enriched_contact.get('email', '')
+                            if email and hasattr(enriched_contact, '__dict__'):
+                                # Store enrichment data
                                 enrichment_data = {
-                                    'enrichment_method': 'advanced_web_intelligence',
                                     'enrichment_timestamp': datetime.utcnow().isoformat(),
-                                    'enrichment_status': 'success',
-                                    'confidence_score': enrichment_result.get('confidence_score', 0),
-                                    'data_sources': enrichment_result.get('data_sources', []),
-                                    'person_data': enrichment_result.get('person_data', {}),
-                                    'company_data': enrichment_result.get('company_data', {}),
-                                    'relationship_intelligence': enrichment_result.get('relationship_intelligence', {}),
-                                    'actionable_insights': enrichment_result.get('actionable_insights', {}),
-                                    'intelligence_summary': enrichment_result.get('intelligence_summary', {})
+                                    'confidence_score': getattr(enriched_contact, 'confidence_score', 0.0),
+                                    'data_sources': getattr(enriched_contact, 'data_sources', []),
+                                    'person_data': getattr(enriched_contact, 'person_data', {}),
+                                    'company_data': getattr(enriched_contact, 'company_data', {}),
+                                    'relationship_intelligence': getattr(enriched_contact, 'relationship_intelligence', {}),
+                                    'actionable_insights': getattr(enriched_contact, 'actionable_insights', {}),
                                 }
                                 
-                                # Update contact metadata in database
                                 success = storage_manager.postgres.update_contact_metadata(
                                     user_id, email, {'enrichment_data': enrichment_data}
                                 )
                                 
                                 if success:
                                     successful_enrichments += 1
-                                    logger.info(f"✅ Stored enrichment for {email} in database")
-                                else:
-                                    logger.warning(f"⚠️ Failed to store enrichment for {email}")
                                     
-                        except Exception as store_error:
-                            logger.error(f"❌ Error storing enrichment for {email}: {store_error}")
-                    
-                    logger.info(f"💾 Successfully stored {successful_enrichments}/{len(enriched_contacts)} enrichments in database")
-                    
-                    await enrichment_service.cleanup()
-                    
-                    # Calculate and return statistics
-                    total_processed = len(enriched_contacts)
-                    successful = sum(1 for result in enriched_contacts.values() 
-                                   if result.get('confidence_score', 0) > 0.3)
-                    failed = total_processed - successful
-                    success_rate = successful / total_processed if total_processed else 0
-                    
-                    # Count unique data sources used
-                    data_sources = set()
-                    for result in enriched_contacts.values():
-                        if result.get('data_sources'):
-                            data_sources.update(result['data_sources'])
+                                    # Update progress every few contacts
+                                    if i % 5 == 0:
+                                        progress = 85 + int((i / len(enriched_contacts)) * 10)  # 85-95% for storage
+                                        update_job_progress(job_id, progress, 
+                                            f'Stored enrichment {i+1}/{len(enriched_contacts)}: {email}', {
+                                            'enrichment_phase': 'storing_results',
+                                            'stored_count': successful_enrichments,
+                                            'current_contact': email
+                                        })
+                                
+                        except Exception as e:
+                            logger.error(f"Failed to store enrichment for contact: {e}")
                     
                     return {
-                        'contacts_processed': total_processed,
-                        'successfully_enriched': successful,
-                        'failed_count': failed,
-                        'success_rate': success_rate,
-                        'sources_used': len(data_sources),
-                        'data_sources_list': list(data_sources),
-                        'domains_analyzed': enriched_data.get('domains_analyzed', 0),
-                        'enrichments_stored_in_db': successful_enrichments,
-                        'enrichment_results': enriched_contacts,
-                        'mode': 'advanced_web_intelligence_with_db_storage_background'
+                        'contacts_processed': len(contacts),
+                        'successfully_enriched': successful_enrichments,
+                        'failed_count': len(contacts) - successful_enrichments,
+                        'success_rate': (successful_enrichments / len(contacts)) * 100 if len(contacts) > 0 else 0,
+                        'sources_used': len(set().union(*[getattr(c, 'data_sources', []) for c in enriched_contacts])),
+                        'mode': 'advanced_background_with_stopping'
                     }
                 
                 # Run the async advanced enrichment in a synchronous context
@@ -1436,40 +1440,28 @@ def enrich_contacts():
                     asyncio.set_event_loop(loop)
                     stats = loop.run_until_complete(run_advanced_enrichment())
                     loop.close()
+                    
+                    # Check if stopped
+                    if stats.get('stopped'):
+                        return  # Job already handled by stop_job_gracefully
+                        
                 except Exception as e:
                     logger.error(f"Advanced contact enrichment failed: {e}")
-                    # Fallback to basic enrichment if advanced one fails
-                    stats = {
-                        'contacts_processed': len(contacts),
-                        'successfully_enriched': 0,
-                        'failed_count': len(contacts),
-                        'success_rate': 0.0,
-                        'sources_used': 0,
-                        'error': f"Advanced enrichment failed: {str(e)}",
-                        'mode': 'fallback_error_background'
-                    }
+                    complete_job(job_id, False, f"Advanced enrichment failed: {str(e)}")
+                    return
                 
-                # Final status update
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'completed'
-                        background_jobs[job_id]['progress'] = 100
-                        background_jobs[job_id]['message'] = f'Contact enrichment complete! Enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts'
-                        background_jobs[job_id]['contacts_enriched'] = stats["successfully_enriched"]
-                        background_jobs[job_id]['contacts_processed'] = stats["contacts_processed"]
-                        background_jobs[job_id]['success_rate'] = stats["success_rate"]
-                        background_jobs[job_id]['sources_used'] = stats["sources_used"]
-                        background_jobs[job_id]['completed_at'] = time.time()
+                # Final completion
+                complete_job(job_id, True,
+                    f'Contact enrichment complete! Enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts',
+                    result=stats,
+                    resume_info={'can_resume': False, 'reason': 'completed_successfully'})
                 
                 logger.info(f"Advanced contact enrichment completed for user {user_email}", stats=stats)
                 
             except Exception as e:
                 logger.error(f"Background contact enrichment job {job_id} failed: {str(e)}")
-                with jobs_lock:
-                    if job_id in background_jobs:
-                        background_jobs[job_id]['status'] = 'failed'
-                        background_jobs[job_id]['message'] = f'Contact enrichment failed: {str(e)}'
-        
+                complete_job(job_id, False, f'Contact enrichment failed: {str(e)}')
+
         # Start background thread
         import threading
         thread = threading.Thread(target=background_contact_enrichment)
@@ -2799,31 +2791,107 @@ def get_user_jobs():
 @api_sync_bp.route('/cancel-job/<job_id>', methods=['POST'])
 @require_auth
 def cancel_job(job_id):
-    """Cancel a running background job"""
+    """Cancel a running background job safely and save progress"""
     try:
-        if job_id in background_jobs:
-            background_jobs[job_id]['status'] = 'cancelled'
-            background_jobs[job_id]['message'] = 'Job cancelled by user'
-            background_jobs[job_id]['completed_at'] = time.time()
+        user_email = session.get('user_email')
+        if not user_email:
+            return jsonify({'error': 'User not authenticated'}), 401
+        
+        with jobs_lock:
+            if job_id not in background_jobs:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Job {job_id} not found'
+                }), 404
             
-            logger.info(f"Job {job_id} cancelled by user")
+            job = background_jobs[job_id]
+            
+            # Verify job belongs to current user
+            if job.get('user_email') != user_email:
+                return jsonify({'error': 'Access denied'}), 403
+            
+            # Set stop flag for graceful shutdown
+            if job_id not in job_stop_flags:
+                job_stop_flags[job_id] = threading.Event()
+            
+            job_stop_flags[job_id].set()  # Signal the job to stop
+            
+            # Update job status with stopping state
+            background_jobs[job_id]['status'] = 'stopping'
+            background_jobs[job_id]['message'] = 'Stopping safely and saving progress...'
+            background_jobs[job_id]['stop_requested_at'] = time.time()
+            
+            logger.info(f"Stop requested for job {job_id} by user {user_email}")
             
             return jsonify({
                 'status': 'success',
-                'message': f'Job {job_id} has been cancelled',
+                'message': f'Stop signal sent to job {job_id}. It will finish safely and save progress.',
                 'job_status': background_jobs[job_id]
             })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Job {job_id} not found'
-            }), 404
             
     except Exception as e:
-        logger.error(f"Error cancelling job {job_id}: {str(e)}")
+        logger.error(f"Error stopping job {job_id}: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': f'Failed to cancel job: {str(e)}'
+            'message': f'Failed to stop job: {str(e)}'
         }), 500
 
 # ===== UTILITY FUNCTIONS =====
+
+# Helper function to check if job should stop
+def should_stop_job(job_id: str) -> bool:
+    """Check if a job has been requested to stop"""
+    if job_id in job_stop_flags:
+        return job_stop_flags[job_id].is_set()
+    return False
+
+# Helper function to update job progress with detailed info
+def update_job_progress(job_id: str, progress: int, message: str, details: Dict[str, Any] = None):
+    """Update job progress with enhanced details"""
+    with jobs_lock:
+        if job_id in background_jobs:
+            background_jobs[job_id]['progress'] = progress
+            background_jobs[job_id]['message'] = message
+            background_jobs[job_id]['last_updated'] = time.time()
+            
+            if details:
+                background_jobs[job_id].update(details)
+
+# Enhanced job completion with resume info
+def complete_job(job_id: str, success: bool, message: str, result: Dict[str, Any] = None, resume_info: Dict[str, Any] = None):
+    """Complete a job with resume information"""
+    with jobs_lock:
+        if job_id in background_jobs:
+            background_jobs[job_id]['status'] = 'completed' if success else 'failed'
+            background_jobs[job_id]['progress'] = 100 if success else background_jobs[job_id].get('progress', 0)
+            background_jobs[job_id]['message'] = message
+            background_jobs[job_id]['completed_at'] = time.time()
+            
+            if result:
+                background_jobs[job_id]['result'] = result
+            
+            if resume_info:
+                background_jobs[job_id]['resume_info'] = resume_info
+    
+    # Clean up stop flag
+    if job_id in job_stop_flags:
+        del job_stop_flags[job_id]
+
+# Enhanced job stopping with graceful completion
+def stop_job_gracefully(job_id: str, message: str, partial_result: Dict[str, Any] = None, resume_info: Dict[str, Any] = None):
+    """Stop a job gracefully with partial results and resume info"""
+    with jobs_lock:
+        if job_id in background_jobs:
+            background_jobs[job_id]['status'] = 'stopped'
+            background_jobs[job_id]['message'] = message
+            background_jobs[job_id]['stopped_at'] = time.time()
+            
+            if partial_result:
+                background_jobs[job_id]['partial_result'] = partial_result
+            
+            if resume_info:
+                background_jobs[job_id]['resume_info'] = resume_info
+    
+    # Clean up stop flag
+    if job_id in job_stop_flags:
+        del job_stop_flags[job_id]

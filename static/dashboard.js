@@ -5949,3 +5949,5 @@ window.addEventListener('load', function() {
     }
 });
 
+// === ENHANCED JOB MANAGEMENT ===
+// Store active job IDs for each step
