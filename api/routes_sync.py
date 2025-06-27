@@ -626,9 +626,9 @@ def sync_emails():
                 
                 # Configuration constants
                 MAX_TOTAL_RUNTIME = 7200  # 2 hours maximum runtime
-                MAX_EMAILS_PER_CONTACT = 50  # Max emails per contact to avoid overwhelming
+                MAX_EMAILS_PER_CONTACT = 1000  # Max emails per contact (increased from 50 to use full date range)
                 CHUNK_SIZE = 10  # Process emails in chunks to manage memory
-                start_time = time.time()  # Track start time for runtime limits
+                start_time = time.time()  # Track start time
                 
                 # Update to show more detailed progress
                 update_job_progress(job_id, 0, 'Initializing email sync...', {
@@ -860,9 +860,30 @@ def sync_emails():
                                     to_addr = headers.get('to', '')
                                     date_str = headers.get('date', '')
                                     
-                                    # Verify this email involves our target contact
-                                    email_text = f"{from_addr} {to_addr}".lower()
-                                    if contact_email not in email_text:
+                                    # SIMPLE TRUSTED CONTACTS FILTERING:
+                                    # Extract clean email addresses
+                                    import re
+                                    from_email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', from_addr.lower())
+                                    to_email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', to_addr.lower())
+                                    
+                                    if not (from_email_match and to_email_match):
+                                        continue  # Skip if we can't parse email addresses
+                                    
+                                    from_email = from_email_match.group()
+                                    to_email = to_email_match.group()
+                                    user_email_clean = user_email.lower()
+                                    
+                                    # Simple rule: 
+                                    # - If user sent it: include it
+                                    # - If someone sent it to user: only include if sender is in trusted contacts
+                                    if from_email == user_email_clean:
+                                        # User sent this email - always include
+                                        pass
+                                    elif to_email == user_email_clean and from_email in target_contacts:
+                                        # Someone from trusted contacts sent to user - include
+                                        pass
+                                    else:
+                                        # Either not involving user, or from untrusted sender - skip
                                         continue
                                     
                                     # Parse date
@@ -1091,7 +1112,7 @@ def analyze_sent_emails():
                 query = f'in:sent after:{cutoff_date.strftime("%Y/%m/%d")}'
                 
                 try:
-                    results = service.users().messages().list(userId='me', q=query, maxResults=500).execute()
+                    results = service.users().messages().list(userId='me', q=query).execute()  # Remove maxResults limit to use full date range
                     messages = results.get('messages', [])
                     
                     with jobs_lock:
@@ -2160,7 +2181,7 @@ def analyze_sent_emails_internal(user_email: str, oauth_credentials: Dict, lookb
             contact_names = {}
             contact_metadata = {}
             
-            for msg in messages[:50]:  # Limit to first 50 sent emails
+            for msg in messages:  # Process all sent emails in date range (removed [:50] limit)
                 try:
                     msg_data = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
                     headers = {}
