@@ -48,6 +48,10 @@ api_sync_bp = Blueprint('api_sync', __name__, url_prefix='/api')
 background_jobs = {}
 jobs_lock = threading.Lock()
 
+# Global job management
+job_stop_flags: Dict[str, threading.Event] = {}
+job_statuses: Dict[str, Dict] = {}
+
 # === Health Check ===
 
 @api_sync_bp.route('/health')
