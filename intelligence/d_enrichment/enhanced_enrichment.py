@@ -7,6 +7,7 @@ advanced web scraping, professional networks, and Claude AI synthesis.
 
 import asyncio
 import json
+import os
 import re
 from datetime import datetime
 from dataclasses import dataclass
