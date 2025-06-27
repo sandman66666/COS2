@@ -1,26 +1,23 @@
 """
-Enhanced Contact Enrichment System
-=================================
-Comprehensive enrichment that actually works by using multiple data sources
-and fixing the web scraping issues.
+Enhanced Contact Enrichment Service
+================================
+Comprehensive contact enrichment using multiple intelligence sources including
+advanced web scraping, professional networks, and Claude AI synthesis.
 """
 
 import asyncio
-import aiohttp
-import re
 import json
-from typing import Dict, List, Optional, Any, Tuple
+import re
 from datetime import datetime
 from dataclasses import dataclass
-import time
-import random
-from urllib.parse import urljoin, urlparse
-import anthropic
-import os
-import ssl
+from typing import Dict, List, Optional, Any
+import aiohttp
 
 from utils.logging import structured_logger as logger
 from config.settings import ANTHROPIC_API_KEY
+from intelligence.d_enrichment.web_enrichment.enrichment_orchestrator import EnrichmentOrchestrator
+from intelligence.d_enrichment.web_enrichment.linkedin_scraper import LinkedInScraper  
+from intelligence.d_enrichment.web_enrichment.twitter_scraper import TwitterScraper
 
 # Claude 4 Opus - now working with proper API key!
 CLAUDE_MODEL = 'claude-opus-4-20250514'
@@ -169,14 +166,78 @@ class EnhancedContactEnricher:
                     data_sources.append('domain_intelligence')
                     logger.info(f"✅ Extracted domain intelligence for {domain}")
             
-            # 4. ENHANCED WEB SCRAPING (Only if we have partial data to verify)
-            if person_data.get('name') or company_data.get('name'):
-                web_data = await self._enhanced_web_scraping(person_data, company_data, domain)
-                if web_data['person'] or web_data['company']:
-                    person_data.update(web_data['person'])
-                    company_data.update(web_data['company'])
-                    data_sources.append('web_scraping')
-                    logger.info(f"✅ Enhanced with web scraping data for {email}")
+            # 4. COMPREHENSIVE WEB INTELLIGENCE (ENHANCED - Uses multiple professional sources)
+            logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
+            
+            # Initialize web enrichment orchestrator
+            web_orchestrator = EnrichmentOrchestrator(self.user_id)
+            try:
+                await web_orchestrator.initialize()
+                
+                # Prepare contact data for web enrichment
+                contact_for_enrichment = {
+                    'email': email,
+                    'name': person_data.get('name', ''),
+                    'company': company_data.get('name', ''),
+                    'domain': domain
+                }
+                
+                # Get comprehensive web intelligence from multiple sources
+                web_results = await web_orchestrator.enrich_contact(
+                    contact_for_enrichment, 
+                    sources=['linkedin', 'twitter']  # Use both professional sources
+                )
+                
+                # Process LinkedIn intelligence
+                if 'linkedin' in web_results and web_results['linkedin'].successful:
+                    linkedin_data = web_results['linkedin'].data
+                    logger.info(f"✅ LinkedIn intelligence gathered for {email}")
+                    
+                    # Enhanced person data from LinkedIn
+                    person_data.update({
+                        'name': linkedin_data.get('name', person_data.get('name', '')),
+                        'current_title': linkedin_data.get('position', ''),
+                        'company': linkedin_data.get('company', person_data.get('company', '')),
+                        'location': linkedin_data.get('location', ''),
+                        'headline': linkedin_data.get('headline', ''),
+                        'about': linkedin_data.get('about', ''),
+                        'experience': linkedin_data.get('experience', []),
+                        'education': linkedin_data.get('education', []),
+                        'skills': linkedin_data.get('skills', []),
+                        'connections': linkedin_data.get('connections', ''),
+                        'profile_url': linkedin_data.get('profile_url', '')
+                    })
+                    
+                    # Enhanced company data if available
+                    if linkedin_data.get('company'):
+                        company_data.update({
+                            'name': linkedin_data.get('company', company_data.get('name', ''))
+                        })
+                    
+                    data_sources.append('linkedin_professional_intelligence')
+                
+                # Process Twitter intelligence  
+                if 'twitter' in web_results and web_results['twitter'].successful:
+                    twitter_data = web_results['twitter'].data
+                    logger.info(f"✅ Twitter intelligence gathered for {email}")
+                    
+                    # Enhanced thought leadership data
+                    person_data.update({
+                        'twitter_handle': twitter_data.get('handle', ''),
+                        'twitter_bio': twitter_data.get('bio', ''),
+                        'follower_count': twitter_data.get('followers', ''),
+                        'recent_tweets': twitter_data.get('recent_tweets', []),
+                        'topics_discussed': twitter_data.get('topics', []),
+                        'engagement_level': twitter_data.get('engagement', ''),
+                        'thought_leadership_areas': twitter_data.get('expertise_areas', [])
+                    })
+                    
+                    data_sources.append('twitter_thought_leadership')
+                
+            except Exception as e:
+                logger.error(f"❌ Web intelligence gathering failed for {email}: {str(e)}")
+            finally:
+                await web_orchestrator.cleanup()
             
             # 5. CLAUDE SYNTHESIS (Final processing)
             if person_data or company_data:
@@ -640,121 +701,6 @@ Only include fields where you have reasonable confidence based on the content.
         
         return data
     
-    async def _enhanced_web_scraping(self, person_data: Dict, company_data: Dict, domain: str) -> Dict:
-        """
-        Enhanced web scraping with better anti-detection when we have some data to verify
-        """
-        enhanced_person = {}
-        enhanced_company = {}
-        
-        # Only do web scraping if we have a name to search for
-        person_name = person_data.get('name')
-        company_name = company_data.get('name')
-        
-        if not person_name and not company_name:
-            return {'person': enhanced_person, 'company': enhanced_company}
-        
-        # Search for LinkedIn profile (more targeted than before)
-        if person_name:
-            linkedin_data = await self._search_linkedin_targeted(person_name, company_name)
-            if linkedin_data:
-                enhanced_person.update(linkedin_data)
-        
-        # Search for company information
-        if company_name:
-            company_web_data = await self._search_company_info(company_name, domain)
-            if company_web_data:
-                enhanced_company.update(company_web_data)
-        
-        return {'person': enhanced_person, 'company': enhanced_company}
-    
-    async def _search_linkedin_targeted(self, person_name: str, company_name: str = None) -> Dict:
-        """Targeted LinkedIn search with better success rate"""
-        try:
-            search_query = f'"{person_name}"'
-            if company_name:
-                search_query += f' "{company_name}"'
-            search_query += ' site:linkedin.com'
-            
-            encoded_query = search_query.replace(' ', '+').replace('"', '%22')
-            
-            # Use Google to find LinkedIn profiles
-            await asyncio.sleep(random.uniform(2, 4))  # Random delay
-            
-            async with self.session.get(
-                f"https://www.google.com/search?q={encoded_query}",
-                headers={'Referer': 'https://www.google.com/'}
-            ) as response:
-                
-                if response.status == 200:
-                    html = await response.text()
-                    
-                    # Extract LinkedIn profile URLs
-                    linkedin_urls = re.findall(r'https://[^"\']*linkedin\.com/in/[^"\']*', html)
-                    
-                    if linkedin_urls:
-                        # Extract basic info from the search result snippet
-                        return await self._extract_linkedin_snippet_info(html, person_name)
-            
-        except Exception as e:
-            logger.debug(f"LinkedIn search failed: {e}")
-        
-        return {}
-    
-    async def _extract_linkedin_snippet_info(self, html: str, person_name: str) -> Dict:
-        """Extract LinkedIn info from Google search snippets"""
-        data = {}
-        
-        # Look for job title patterns in snippets
-        title_patterns = [
-            rf'{re.escape(person_name)}[^<]*?(?:is|works as|employed as)\s*([^<\n,]+)',
-            rf'([^<\n,]+)\s*at\s*[^<\n]+{re.escape(person_name)}',
-            rf'{re.escape(person_name)}[^<]*?([A-Z][^<\n,]*(?:Manager|Director|VP|CEO|CTO|Engineer|Developer|Analyst))'
-        ]
-        
-        for pattern in title_patterns:
-            match = re.search(pattern, html, re.IGNORECASE)
-            if match:
-                data['title'] = match.group(1).strip()
-                break
-        
-        return data
-    
-    async def _search_company_info(self, company_name: str, domain: str) -> Dict:
-        """Search for additional company information"""
-        data = {}
-        
-        try:
-            search_query = f'"{company_name}" company about'
-            encoded_query = search_query.replace(' ', '+').replace('"', '%22')
-            
-            await asyncio.sleep(random.uniform(2, 4))
-            
-            async with self.session.get(
-                f"https://www.google.com/search?q={encoded_query}",
-                headers={'Referer': 'https://www.google.com/'}
-            ) as response:
-                
-                if response.status == 200:
-                    html = await response.text()
-                    
-                    # Extract company info from snippets
-                    industry_patterns = [
-                        rf'{re.escape(company_name)}[^<]*?(?:is|specializes in|focuses on)\s*([^<\n.]+)',
-                        rf'([^<\n.]+)\s*company\s*{re.escape(company_name)}',
-                    ]
-                    
-                    for pattern in industry_patterns:
-                        match = re.search(pattern, html, re.IGNORECASE)
-                        if match:
-                            data['industry_context'] = match.group(1).strip()
-                            break
-        
-        except Exception as e:
-            logger.debug(f"Company search failed: {e}")
-        
-        return data
-    
     async def _claude_data_synthesis(self, email: str, person_data: Dict, 
                                    company_data: Dict, data_sources: List[str]) -> Dict:
         """
@@ -770,144 +716,137 @@ You are a professional intelligence analyst. Synthesize this data into comprehen
 EMAIL: {email}
 DATA SOURCES: {', '.join(data_sources)}
 
-RAW PERSON DATA:
+ENHANCED PERSON DATA (LinkedIn + Twitter Intelligence):
 {json.dumps(person_data, indent=2)}
 
-RAW COMPANY DATA:
+ENHANCED COMPANY DATA:
 {json.dumps(company_data, indent=2)}
 
-Extract MAXIMUM intelligence and provide a comprehensive professional profile:
+Extract MAXIMUM intelligence from LinkedIn experience, skills, about section, Twitter thought leadership, and other professional data to provide comprehensive business intelligence:
 
 {{
     "person": {{
-        "name": "Full professional name",
-        "current_title": "Current role/position",
-        "seniority_level": "junior/mid/senior/executive/founder",
-        "career_stage": "early-career/growth/established/veteran/executive",
+        "name": "Full professional name from LinkedIn/email",
+        "current_title": "Current role/position from LinkedIn",
+        "seniority_level": "junior/mid/senior/executive/founder (analyze from experience/title)",
+        "career_stage": "early-career/growth/established/veteran/executive (from experience progression)",
         
         "professional_background": {{
-            "previous_companies": ["Company 1", "Company 2"],
-            "career_progression": "Brief career journey summary",
-            "years_experience": "estimated total experience",
-            "industry_expertise": ["primary industry", "secondary industry"],
-            "functional_expertise": ["function 1", "function 2"],
-            "education_background": "university/degree if found",
-            "certifications": ["cert 1", "cert 2"] 
+            "previous_companies": "Extract from LinkedIn experience array",
+            "career_progression": "Analyze career journey from experience data",
+            "years_experience": "Calculate from LinkedIn experience timeline",
+            "industry_expertise": "Derive from experience + skills",
+            "functional_expertise": "Extract from titles + skills",
+            "education_background": "From LinkedIn education array", 
+            "certifications": "From LinkedIn skills/education",
+            "skills_and_expertise": "Top skills from LinkedIn skills array"
         }},
         
         "current_focus": {{
-            "investment_thesis": "if investor - what they invest in",
-            "portfolio_companies": ["company 1", "company 2"] if investor,
-            "key_initiatives": ["current projects/focus areas"],
-            "speaking_topics": ["areas of expertise they speak about"],
-            "content_themes": ["topics they write/post about"]
+            "investment_thesis": "If investor - analyze from about/headline/tweets",
+            "portfolio_companies": "Extract from LinkedIn experience if investor",
+            "key_initiatives": "From LinkedIn about section + recent experience",
+            "speaking_topics": "Analyze from Twitter topics + LinkedIn headline",
+            "content_themes": "From Twitter recent_tweets analysis",
+            "thought_leadership_areas": "From Twitter thought_leadership_areas"
+        }},
+        
+        "social_intelligence": {{
+            "twitter_handle": "From Twitter data",
+            "twitter_bio": "Professional bio from Twitter", 
+            "follower_count": "Twitter followers (influence indicator)",
+            "engagement_style": "Analyze from Twitter tweets + LinkedIn about",
+            "content_frequency": "Analyze from Twitter activity",
+            "professional_topics": "Merge Twitter topics + LinkedIn skills"
         }},
         
         "network_intelligence": {{
-            "board_positions": ["company board positions"],
-            "advisor_roles": ["companies they advise"],
-            "professional_associations": ["industry groups"],
-            "conference_appearances": ["events they speak at"],
-            "media_mentions": ["publications that quote them"]
+            "linkedin_connections": "From LinkedIn connections count",
+            "network_value": "Assess from connections + experience level",
+            "industry_influence": "Calculate from followers + experience + skills",
+            "thought_leadership": "Based on Twitter engagement + LinkedIn headline",
+            "conference_speaking": "Infer from skills + seniority",
+            "media_presence": "Based on Twitter activity + professional background"
         }},
         
         "communication_insights": {{
-            "communication_style": "professional/casual/formal/technical",
-            "response_patterns": "quick/deliberate/formal",
-            "preferred_topics": ["business topics they engage with"],
-            "social_presence": "active/minimal/thought-leader",
-            "outreach_timing": "best times/approaches for contact"
+            "communication_style": "Analyze from Twitter bio + LinkedIn about + tweets",
+            "response_patterns": "Infer from social activity level",
+            "preferred_topics": "Merge Twitter topics + LinkedIn skills",
+            "social_presence": "active/minimal/thought-leader from Twitter data", 
+            "outreach_timing": "Best approach based on communication style",
+            "engagement_likelihood": "Based on social activity + role"
         }},
         
         "value_proposition": {{
-            "what_they_offer": "value they can provide",
-            "decision_authority": "what they can decide on",
-            "budget_authority": "estimated budget influence",
-            "network_value": "valuable connections they have",
-            "expertise_value": "knowledge they can share"
+            "what_they_offer": "Analyze from experience + skills + about section",
+            "decision_authority": "Infer from title + seniority + company",
+            "budget_authority": "Estimate from role + company stage",
+            "network_value": "Based on connections + industry + experience",
+            "expertise_value": "Top areas from skills + experience + tweets"
         }}
     }},
     
     "company": {{
-        "name": "Official company name",
-        "industry": "Primary industry sector",
-        "sub_industry": "Specific niche/focus area",
+        "name": "Official company name from LinkedIn/domain",
+        "industry": "Primary industry from LinkedIn company + domain intelligence",
+        "sub_industry": "Specific niche from LinkedIn experience",
         
         "company_profile": {{
-            "business_model": "B2B/B2C/marketplace/SaaS/etc",
-            "revenue_model": "subscription/transaction/licensing/etc",
-            "target_market": "enterprise/SMB/consumer/etc",
-            "company_stage": "seed/growth/mature/public/etc",
-            "employee_count": "estimated size range",
-            "headquarters": "primary location",
-            "founded_year": "year established"
+            "business_model": "Infer from company data + person's role",
+            "revenue_model": "Analyze from company intelligence",
+            "target_market": "From domain intelligence + person's background",
+            "company_stage": "From domain data + person's seniority",
+            "employee_count": "From domain intelligence",
+            "headquarters": "From LinkedIn location + domain data",
+            "founded_year": "From domain intelligence if available"
         }},
         
         "financial_intelligence": {{
-            "funding_status": "bootstrapped/funded/public",
-            "funding_rounds": ["Series A $XM", "Series B $XM"],
-            "key_investors": ["investor 1", "investor 2"],
-            "estimated_valuation": "if available",
-            "revenue_estimates": "if available",
-            "growth_trajectory": "growing/stable/declining"
+            "funding_status": "From domain intelligence",
+            "funding_rounds": "Extract if available from domain data",
+            "key_investors": "From domain intelligence",
+            "estimated_valuation": "If available from domain data",
+            "revenue_estimates": "Infer from company stage + employees",
+            "growth_trajectory": "Analyze from company data + hiring"
         }},
         
         "market_position": {{
-            "competitive_landscape": "leader/challenger/niche/startup",
-            "key_competitors": ["competitor 1", "competitor 2"],
-            "differentiation": "what makes them unique",
-            "market_trends": "industry trends affecting them",
-            "growth_opportunities": "expansion areas"
+            "competitive_landscape": "From domain intelligence + industry analysis",
+            "key_competitors": "From industry knowledge + domain data",
+            "differentiation": "From company description + domain intelligence",
+            "market_trends": "Industry context from domain intelligence",
+            "growth_opportunities": "Based on company stage + market"
         }},
         
         "technology_profile": {{
-            "tech_stack": ["primary technologies used"],
-            "digital_maturity": "traditional/digital-native/tech-forward",
-            "innovation_focus": ["AI/cloud/mobile/etc"],
-            "technology_partnerships": ["key tech partners"],
-            "digital_transformation": "stage of digital adoption"
-        }},
-        
-        "business_intelligence": {{
-            "key_products": ["main products/services"],
-            "customer_base": "types of customers",
-            "geographic_presence": "markets they serve",
-            "partnership_strategy": "how they work with partners",
-            "expansion_plans": "growth strategies",
-            "acquisition_history": ["companies acquired"],
-            "exit_strategy": "IPO/acquisition potential"
-        }},
-        
-        "decision_making": {{
-            "decision_makers": ["key executives by function"],
-            "procurement_process": "how they buy",
-            "budget_cycles": "when they make purchasing decisions",
-            "vendor_preferences": "types of partners they work with",
-            "evaluation_criteria": "what they value in partners"
+            "tech_stack": "Infer from company type + domain intelligence",
+            "digital_maturity": "Assess from company profile",
+            "innovation_focus": "From company description + person's skills",
+            "technology_partnerships": "From domain intelligence if available"
         }}
     }},
     
     "relationship_intelligence": {{
-        "engagement_level": "high/medium/low based on email frequency",
-        "relationship_stage": "cold/warm/active/partnership",
-        "mutual_connections": ["shared network if identified"],
-        "collaboration_opportunities": ["potential areas to work together"],
-        "referral_potential": "likelihood they'd make introductions",
-        "influence_score": "how influential they are in their network"
+        "engagement_level": "high/medium/low based on email frequency + social activity",
+        "relationship_stage": "cold/warm/active/partnership based on communication",
+        "mutual_connections": "Potential overlap based on industry + location",
+        "collaboration_opportunities": "Based on expertise + company needs",
+        "referral_potential": "Based on network size + influence + relationship",
+        "influence_score": "Calculate from followers + connections + experience"
     }},
     
     "actionable_insights": {{
-        "best_approach": "how to most effectively engage them",
-        "value_propositions": ["what would interest them most"],
-        "timing_considerations": "when to reach out",
-        "conversation_starters": ["relevant topics to discuss"],
-        "meeting_likelihood": "probability they'd take a meeting",
-        "decision_timeline": "how quickly they typically make decisions"
+        "best_approach": "Optimal engagement strategy based on communication style + role",
+        "value_propositions": "What would most interest them based on focus areas",
+        "timing_considerations": "When to reach out based on activity patterns",
+        "conversation_starters": "Relevant topics from Twitter + LinkedIn interests",
+        "meeting_likelihood": "Probability based on role + engagement style + social activity",
+        "decision_timeline": "Speed based on role + company + industry"
     }}
 }}
 
-Be thorough and intelligent. Extract every possible insight. Make educated inferences where data suggests patterns. This intelligence will drive important business decisions.
-"""
+CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use ALL Twitter bio, tweets, and engagement data. This is comprehensive business intelligence - extract every insight possible from the rich professional data collected."""
 
             working_model = CLAUDE_MODEL
             response = await asyncio.to_thread(
@@ -1150,18 +1089,78 @@ Be thorough and intelligent. Extract every possible insight. Make educated infer
             # 3. SKIP DOMAIN INTELLIGENCE (already cached)
             # This is the efficiency gain - we don't redo domain analysis!
             
-            # 4. ENHANCED WEB SCRAPING (Only if we have partial data to verify)
-            if person_data.get('name') or company_data.get('name'):
-                domain = email.split('@')[1] if '@' in email else None
-                web_data = await self._enhanced_web_scraping(person_data, company_data, domain)
-                if web_data['person'] or web_data['company']:
-                    person_data.update(web_data['person'])
-                    # Merge company data carefully
-                    for key, value in web_data['company'].items():
-                        if value and (key not in company_data or not company_data[key]):
-                            company_data[key] = value
-                    data_sources.append('web_scraping')
-                    logger.info(f"✅ Enhanced with web scraping data for {email}")
+            # 4. COMPREHENSIVE WEB INTELLIGENCE (ENHANCED - Uses multiple professional sources)
+            logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
+            
+            # Initialize web enrichment orchestrator
+            web_orchestrator = EnrichmentOrchestrator(self.user_id)
+            try:
+                await web_orchestrator.initialize()
+                
+                # Prepare contact data for web enrichment
+                contact_for_enrichment = {
+                    'email': email,
+                    'name': person_data.get('name', ''),
+                    'company': company_data.get('name', ''),
+                    'domain': domain
+                }
+                
+                # Get comprehensive web intelligence from multiple sources
+                web_results = await web_orchestrator.enrich_contact(
+                    contact_for_enrichment, 
+                    sources=['linkedin', 'twitter']  # Use both professional sources
+                )
+                
+                # Process LinkedIn intelligence
+                if 'linkedin' in web_results and web_results['linkedin'].successful:
+                    linkedin_data = web_results['linkedin'].data
+                    logger.info(f"✅ LinkedIn intelligence gathered for {email}")
+                    
+                    # Enhanced person data from LinkedIn
+                    person_data.update({
+                        'name': linkedin_data.get('name', person_data.get('name', '')),
+                        'current_title': linkedin_data.get('position', ''),
+                        'company': linkedin_data.get('company', person_data.get('company', '')),
+                        'location': linkedin_data.get('location', ''),
+                        'headline': linkedin_data.get('headline', ''),
+                        'about': linkedin_data.get('about', ''),
+                        'experience': linkedin_data.get('experience', []),
+                        'education': linkedin_data.get('education', []),
+                        'skills': linkedin_data.get('skills', []),
+                        'connections': linkedin_data.get('connections', ''),
+                        'profile_url': linkedin_data.get('profile_url', '')
+                    })
+                    
+                    # Enhanced company data if available
+                    if linkedin_data.get('company'):
+                        company_data.update({
+                            'name': linkedin_data.get('company', company_data.get('name', ''))
+                        })
+                    
+                    data_sources.append('linkedin_professional_intelligence')
+                
+                # Process Twitter intelligence  
+                if 'twitter' in web_results and web_results['twitter'].successful:
+                    twitter_data = web_results['twitter'].data
+                    logger.info(f"✅ Twitter intelligence gathered for {email}")
+                    
+                    # Enhanced thought leadership data
+                    person_data.update({
+                        'twitter_handle': twitter_data.get('handle', ''),
+                        'twitter_bio': twitter_data.get('bio', ''),
+                        'follower_count': twitter_data.get('followers', ''),
+                        'recent_tweets': twitter_data.get('recent_tweets', []),
+                        'topics_discussed': twitter_data.get('topics', []),
+                        'engagement_level': twitter_data.get('engagement', ''),
+                        'thought_leadership_areas': twitter_data.get('expertise_areas', [])
+                    })
+                    
+                    data_sources.append('twitter_thought_leadership')
+                
+            except Exception as e:
+                logger.error(f"❌ Web intelligence gathering failed for {email}: {str(e)}")
+            finally:
+                await web_orchestrator.cleanup()
             
             # 5. CLAUDE SYNTHESIS (Final processing)
             if person_data or company_data:

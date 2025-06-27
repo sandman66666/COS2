@@ -204,40 +204,25 @@ class ContactEnrichmentService:
             "data_sources": result.data_sources,
             "enrichment_timestamp": result.enrichment_timestamp.isoformat(),
             
-            # Person data
-            "person": {
-                "name": result.person_data.get('name', ''),
-                "title": result.person_data.get('title', ''),
-                "phone": result.person_data.get('phone', ''),
-                "mobile": result.person_data.get('mobile', ''),
-                "seniority_level": result.person_data.get('seniority_level', ''),
-                "expertise_areas": result.person_data.get('expertise_areas', []),
-                "communication_style": result.person_data.get('communication_style', ''),
-                "interests": result.person_data.get('interests', ''),
-                "confidence_indicators": result.person_data.get('confidence_indicators', [])
-            },
+            # Person data - include ALL enriched data
+            "person": result.person_data,
             
-            # Company data
-            "company": {
-                "name": result.company_data.get('name', ''),
-                "industry": result.company_data.get('industry', ''),
-                "website": result.company_data.get('website', ''),
-                "address": result.company_data.get('address', ''),
-                "size_category": result.company_data.get('size_category', ''),
-                "business_model": result.company_data.get('business_model', ''),
-                "technology_maturity": result.company_data.get('technology_maturity', ''),
-                "market_position": result.company_data.get('market_position', ''),
-                "description": result.company_data.get('description', ''),
-                "products": result.company_data.get('products', []),
-                "culture": result.company_data.get('culture', '')
-            },
+            # Company data - include ALL enriched data  
+            "company": result.company_data,
             
-            # Intelligence summary
-            "intelligence_summary": {
+            # Relationship intelligence - pass through from enricher
+            "relationship_intelligence": result.relationship_intelligence,
+            
+            # Actionable insights - pass through from enricher
+            "actionable_insights": result.actionable_insights,
+            
+            # Intelligence summary - use rich data if available, fallback to basic metrics
+            "intelligence_summary": result.actionable_insights if result.actionable_insights else {
                 "total_data_sources": len(result.data_sources),
                 "primary_source": result.data_sources[0] if result.data_sources else "none",
                 "data_richness": self._calculate_data_richness(result),
-                "reliability_score": self._calculate_reliability_score(result)
+                "reliability_score": self._calculate_reliability_score(result),
+                "note": "Limited public data available for comprehensive intelligence analysis"
             },
             
             "error": result.error
@@ -253,37 +238,25 @@ class ContactEnrichmentService:
             "data_sources": [],
             "enrichment_timestamp": datetime.utcnow().isoformat(),
             
-            "person": {
-                "name": "",
-                "title": "",
-                "phone": "",
-                "mobile": "",
-                "seniority_level": "",
-                "expertise_areas": [],
-                "communication_style": "",
-                "interests": "",
-                "confidence_indicators": []
-            },
+            # Person data - empty
+            "person": {},
             
-            "company": {
-                "name": "",
-                "industry": "",
-                "website": "",
-                "address": "",
-                "size_category": "",
-                "business_model": "",
-                "technology_maturity": "",
-                "market_position": "",
-                "description": "",
-                "products": [],
-                "culture": ""
-            },
+            # Company data - empty
+            "company": {},
             
+            # Relationship intelligence - empty
+            "relationship_intelligence": {},
+            
+            # Actionable insights - empty
+            "actionable_insights": {},
+            
+            # Intelligence summary - basic metrics only
             "intelligence_summary": {
                 "total_data_sources": 0,
                 "primary_source": "none",
                 "data_richness": 0.0,
-                "reliability_score": 0.0
+                "reliability_score": 0.0,
+                "note": f"Enrichment failed: {error}"
             },
             
             "error": error

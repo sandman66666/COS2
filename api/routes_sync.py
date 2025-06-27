@@ -1380,6 +1380,8 @@ def enrich_contacts():
                                     'data_sources': enrichment_result.get('data_sources', []),
                                     'person_data': enrichment_result.get('person_data', {}),
                                     'company_data': enrichment_result.get('company_data', {}),
+                                    'relationship_intelligence': enrichment_result.get('relationship_intelligence', {}),
+                                    'actionable_insights': enrichment_result.get('actionable_insights', {}),
                                     'intelligence_summary': enrichment_result.get('intelligence_summary', {})
                                 }
                                 

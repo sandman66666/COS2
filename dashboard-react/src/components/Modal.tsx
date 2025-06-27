@@ -704,21 +704,31 @@ const Modal: React.FC<ModalProps> = ({ stepId, stepName, data, onClose }) => {
                               )}
                               
                               {/* Intelligence Summary - Show as formatted sections instead of raw JSON */}
-                              {contact.metadata.enrichment_data.intelligence_summary && (
+                              {contact.metadata.enrichment_data.intelligence_summary && 
+                               typeof contact.metadata.enrichment_data.intelligence_summary === 'object' &&
+                               Object.keys(contact.metadata.enrichment_data.intelligence_summary).length > 0 && (
                                 <DetailSection>
                                   <DetailTitle>🧠 Intelligence Summary</DetailTitle>
-                                  {typeof contact.metadata.enrichment_data.intelligence_summary === 'object' ? (
-                                    Object.entries(contact.metadata.enrichment_data.intelligence_summary).map(([key, value]) => (
-                                      <DetailItem key={key}>
-                                        <DetailLabel>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</DetailLabel>
-                                        <DetailValue>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</DetailValue>
-                                      </DetailItem>
-                                    ))
-                                  ) : (
-                                    <DetailItem>
-                                      <DetailValue>{String(contact.metadata.enrichment_data.intelligence_summary)}</DetailValue>
+                                  {Object.entries(contact.metadata.enrichment_data.intelligence_summary).map(([key, value]) => (
+                                    <DetailItem key={key}>
+                                      <DetailLabel>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</DetailLabel>
+                                      <DetailValue>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</DetailValue>
                                     </DetailItem>
-                                  )}
+                                  ))}
+                                </DetailSection>
+                              )}
+                              
+                              {/* Debug: Show if intelligence_summary exists but is empty */}
+                              {contact.metadata.enrichment_data.intelligence_summary && 
+                               typeof contact.metadata.enrichment_data.intelligence_summary === 'object' &&
+                               Object.keys(contact.metadata.enrichment_data.intelligence_summary).length === 0 && (
+                                <DetailSection>
+                                  <DetailTitle>🧠 Intelligence Summary</DetailTitle>
+                                  <DetailItem>
+                                    <DetailValue style={{ color: '#666', fontStyle: 'italic' }}>
+                                      Intelligence analysis completed but no structured summary generated. This may indicate limited public data available for this contact.
+                                    </DetailValue>
+                                  </DetailItem>
                                 </DetailSection>
                               )}
                             </DetailGrid>
