@@ -1427,7 +1427,7 @@ def enrich_contacts():
                         
                         # Get user emails for context analysis
                         logger.info(f"🔧 Background job {job_id} - fetching user emails")
-                        user_emails, _ = storage_manager.get_emails(user_id, limit=1000)
+                        user_emails = storage_manager.get_emails_for_user(user_id, limit=50)
                         logger.info(f"🔧 Background job {job_id} - got {len(user_emails)} user emails")
                         
                         # Run enhanced batch enrichment with stop checking

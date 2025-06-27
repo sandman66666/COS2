@@ -49,37 +49,45 @@ class EnhancedContactEnricher:
     Includes LinkedIn scraping, Twitter analysis, and Claude AI synthesis
     """
     
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, storage_manager=None):
         self.user_id = user_id
+        self.storage_manager = storage_manager
+        self.session = None
+        self.claude_client = None
+        self.domain_cache = {}
+        self.cache_duration_hours = 24
+        self.browser_available = False
         self.logger = logger
         self.linkedin_scraper = None
         self.twitter_scraper = None
-        self.claude_client = None
-        self.storage_manager = None
         self.enrichment_orchestrator = None
-        self.browser_available = False
-        self.domain_cache = {}
         
     async def initialize(self):
-        """Initialize all intelligence gathering services"""
+        """Initialize Claude client and networking"""
         try:
-            # Initialize Claude AI client
-            api_key = os.getenv('ANTHROPIC_API_KEY', 'your-actual-api-key-here')
-            if api_key and api_key != 'your-actual-api-key-here':
-                self.claude_client = anthropic.Anthropic(api_key=api_key)
-                self.logger.info(f"Claude client initialized with API key: {api_key[:20]}...{api_key[-10:]}")
+            # Initialize Claude
+            if ANTHROPIC_API_KEY:
+                import anthropic
+                self.claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+                self.logger.info("✅ Claude client initialized")
+            else:
+                self.logger.warning("⚠️ No Anthropic API key - Claude synthesis unavailable")
             
-            self.logger.info(f"Enhanced enricher initialized for user {self.user_id}")
+            # Initialize HTTP session
+            import httpx
+            self.session = httpx.AsyncClient(
+                timeout=30.0,
+                headers={'User-Agent': 'Mozilla/5.0 (contact enrichment service)'}
+            )
             
-            # Try to initialize browser-based scrapers
+            # Try browser initialization (fallback only)
             await self._try_browser_initialization()
             
-            # Initialize storage and orchestrator
-            await self._initialize_storage_and_orchestrator()
+            self.logger.info(f"✅ Enhanced Contact Enricher initialized for user {self.user_id}")
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize enhanced enricher: {e}")
-            
+            self.logger.error(f"Enhanced enricher initialization failed: {e}")
+
     async def _try_browser_initialization(self):
         """Try to initialize browser-based scrapers, continue without if unavailable"""
         try:
@@ -106,16 +114,11 @@ class EnhancedContactEnricher:
 
     async def _initialize_storage_and_orchestrator(self):
         """Initialize storage and orchestration components"""
-        try:
-            from storage.storage_manager import get_async_storage_manager
-            from intelligence.d_enrichment.web_enrichment.enrichment_orchestrator import EnrichmentOrchestrator
-            
-            self.storage_manager = await get_async_storage_manager()
-            await self.storage_manager.initialize()
-            self.logger.info("Connected to postgres")
-            
-        except Exception as e:
-            self.logger.error(f"Storage initialization failed: {e}")
+        # Storage manager is now passed in constructor, no need to initialize
+        if self.storage_manager:
+            self.logger.info("✅ Using provided storage manager")
+        else:
+            self.logger.warning("⚠️ No storage manager provided")
 
     def _get_memory_usage(self):
         """Get current memory usage percentage"""

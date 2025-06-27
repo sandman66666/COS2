@@ -26,7 +26,7 @@ class ContactEnrichmentService:
     
     def __init__(self, user_id: int, storage_manager=None):
         self.user_id = user_id
-        self.basic_enricher = EnhancedContactEnricher(user_id)
+        self.basic_enricher = EnhancedContactEnricher(user_id, storage_manager)
         self.advanced_intelligence = AdvancedWebIntelligence(user_id)
         self.storage_manager = storage_manager  # For database access
         
