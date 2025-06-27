@@ -13,6 +13,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 import aiohttp
+import anthropic
 
 from utils.logging import structured_logger as logger
 from config.settings import ANTHROPIC_API_KEY
