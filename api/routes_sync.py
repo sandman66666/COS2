@@ -18,6 +18,7 @@ import threading
 from functools import wraps
 import uuid
 import time
+import gc  # For garbage collection
 
 from config.settings import (
     API_HOST, 
@@ -622,6 +623,14 @@ def sync_emails():
                 import base64
                 import email
                 import re
+                import gc  # For garbage collection
+                
+                # Set maximum processing limits to prevent timeouts
+                MAX_EMAILS_PER_CONTACT = 100  # Limit emails per contact
+                MAX_TOTAL_RUNTIME = 1800  # 30 minutes max runtime
+                CHUNK_SIZE = 20  # Process emails in chunks
+                
+                start_time = time.time()
                 
                 # Update status to connecting
                 with jobs_lock:
@@ -655,10 +664,10 @@ def sync_emails():
                 
                 with jobs_lock:
                     if job_id in background_jobs:
-                        background_jobs[job_id]['message'] = f'Found {len(target_contacts)} contacts to sync emails from'
+                        background_jobs[job_id]['message'] = f'Found {len(target_contacts)} contacts to sync emails from (max {MAX_EMAILS_PER_CONTACT} emails per contact)'
                         background_jobs[job_id]['total_contacts'] = len(target_contacts)
                 
-                logger.info(f"Syncing emails from {len(target_contacts)} discovered contacts for past {days} days")
+                logger.info(f"Syncing emails from {len(target_contacts)} discovered contacts for past {days} days (resource-managed)")
                 
                 # Create credentials object
                 try:
@@ -698,18 +707,27 @@ def sync_emails():
                 new_emails = 0
                 updated_emails = 0
                 contacts_processed = 0
+                skipped_contacts = 0
                 
                 target_contacts_list = list(target_contacts)
                 
-                # Process emails for each contact individually - no limits, just time-based
-                logger.info(f"Searching for ALL emails from discovered contacts since {cutoff_date.strftime('%Y-%m-%d')}")
+                # Process emails for each contact individually with resource management
+                logger.info(f"Searching for emails from discovered contacts since {cutoff_date.strftime('%Y-%m-%d')} (resource-managed)")
                 
                 for i, contact_email in enumerate(target_contacts_list):
                     try:
+                        # Check runtime limit
+                        if time.time() - start_time > MAX_TOTAL_RUNTIME:
+                            logger.warning(f"Reached maximum runtime ({MAX_TOTAL_RUNTIME}s), stopping at contact {contacts_processed}")
+                            with jobs_lock:
+                                if job_id in background_jobs:
+                                    background_jobs[job_id]['message'] = f'Reached time limit at contact {contacts_processed}/{len(target_contacts_list)} - Synced {new_emails} emails'
+                            break
+                        
                         contacts_processed += 1
                         
-                        # Update progress every 5 contacts
-                        if contacts_processed % 5 == 0:
+                        # Update progress every 3 contacts
+                        if contacts_processed % 3 == 0:
                             progress = int((contacts_processed / len(target_contacts_list)) * 100)
                             with jobs_lock:
                                 if job_id in background_jobs:
@@ -718,34 +736,41 @@ def sync_emails():
                                     background_jobs[job_id]['emails_synced'] = new_emails
                                     background_jobs[job_id]['message'] = f'Processing contact {contacts_processed}/{len(target_contacts_list)}: {contact_email} - Found {new_emails} emails so far'
                         
-                        # Build query for this specific contact - time-based only
+                        # Build query for this specific contact with limits
                         query = f'(from:{contact_email} OR to:{contact_email}) after:{cutoff_date.strftime("%Y/%m/%d")}'
                         
                         logger.info(f"Processing contact {contacts_processed}/{len(target_contacts_list)}: {contact_email}")
                         
-                        # Get ALL messages for this contact (no maxResults limit for time-based approach)
+                        # Get messages with pagination but enforce limits
                         messages = []
                         page_token = None
+                        total_fetched = 0
                         
-                        while True:
+                        while total_fetched < MAX_EMAILS_PER_CONTACT:
                             try:
+                                remaining = MAX_EMAILS_PER_CONTACT - total_fetched
+                                max_results = min(remaining, 20)  # Fetch in small batches
+                                
                                 if page_token:
                                     messages_response = service.users().messages().list(
                                         userId='me',
                                         q=query,
-                                        pageToken=page_token
+                                        pageToken=page_token,
+                                        maxResults=max_results
                                     ).execute()
                                 else:
                                     messages_response = service.users().messages().list(
                                         userId='me',
-                                        q=query
+                                        q=query,
+                                        maxResults=max_results
                                     ).execute()
                                 
                                 batch_messages = messages_response.get('messages', [])
                                 messages.extend(batch_messages)
+                                total_fetched += len(batch_messages)
                                 
                                 page_token = messages_response.get('nextPageToken')
-                                if not page_token:
+                                if not page_token or len(batch_messages) == 0:
                                     break
                                     
                                 # Throttle between API calls
@@ -758,125 +783,138 @@ def sync_emails():
                         if not messages:
                             continue
                         
-                        logger.info(f"Found {len(messages)} emails for {contact_email}")
+                        # Log if we hit the limit
+                        if len(messages) >= MAX_EMAILS_PER_CONTACT:
+                            logger.info(f"Limited to {MAX_EMAILS_PER_CONTACT} emails for {contact_email} (may have more)")
+                        else:
+                            logger.info(f"Found {len(messages)} emails for {contact_email}")
                         
-                        # Process each message
-                        for msg in messages:
-                            try:
-                                # Check if we already have this email
-                                existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
-                                if existing:
-                                    updated_emails += 1
-                                    continue
-                                
-                                # Get full message
-                                msg_data = service.users().messages().get(
-                                    userId='me',
-                                    id=msg['id'],
-                                    format='full'
-                                ).execute()
-                                
-                                # Parse message headers
-                                headers = {}
-                                for header in msg_data.get('payload', {}).get('headers', []):
-                                    name = header.get('name', '').lower()
-                                    value = header.get('value', '')
-                                    headers[name] = value
-                                
-                                # Extract basic info
-                                subject = headers.get('subject', '(No Subject)')
-                                from_addr = headers.get('from', '')
-                                to_addr = headers.get('to', '')
-                                date_str = headers.get('date', '')
-                                
-                                # Verify this email involves our target contact
-                                email_text = f"{from_addr} {to_addr}".lower()
-                                if contact_email not in email_text:
-                                    continue
-                                
-                                # Parse date
+                        # Process emails in chunks to manage memory
+                        for chunk_start in range(0, len(messages), CHUNK_SIZE):
+                            chunk_end = min(chunk_start + CHUNK_SIZE, len(messages))
+                            chunk_messages = messages[chunk_start:chunk_end]
+                            
+                            for msg in chunk_messages:
                                 try:
-                                    if date_str:
-                                        date_sent = email.utils.parsedate_to_datetime(date_str)
-                                    else:
+                                    # Check if we already have this email
+                                    existing = storage_manager.postgres.get_email_by_gmail_id(user_id, msg['id'])
+                                    if existing:
+                                        updated_emails += 1
+                                        continue
+                                    
+                                    # Get full message
+                                    msg_data = service.users().messages().get(
+                                        userId='me',
+                                        id=msg['id'],
+                                        format='metadata'  # Use metadata format to reduce payload
+                                    ).execute()
+                                    
+                                    # Parse message headers
+                                    headers = {}
+                                    for header in msg_data.get('payload', {}).get('headers', []):
+                                        name = header.get('name', '').lower()
+                                        value = header.get('value', '')
+                                        headers[name] = value
+                                    
+                                    # Extract basic info
+                                    subject = headers.get('subject', '(No Subject)')
+                                    from_addr = headers.get('from', '')
+                                    to_addr = headers.get('to', '')
+                                    date_str = headers.get('date', '')
+                                    
+                                    # Verify this email involves our target contact
+                                    email_text = f"{from_addr} {to_addr}".lower()
+                                    if contact_email not in email_text:
+                                        continue
+                                    
+                                    # Parse date
+                                    try:
+                                        if date_str:
+                                            date_sent = email.utils.parsedate_to_datetime(date_str)
+                                        else:
+                                            date_sent = datetime.now(timezone.utc)
+                                    except:
                                         date_sent = datetime.now(timezone.utc)
-                                except:
-                                    date_sent = datetime.now(timezone.utc)
-                                
-                                # Skip if email is older than our cutoff (extra safety)
-                                if date_sent < cutoff_date:
+                                    
+                                    # Skip if email is older than our cutoff (extra safety)
+                                    if date_sent < cutoff_date:
+                                        continue
+                                    
+                                    # Store email with metadata only (no body to save memory)
+                                    metadata = {
+                                        'subject': subject,
+                                        'from': from_addr,
+                                        'to': to_addr,
+                                        'date': date_str,
+                                        'headers': {k: v for k, v in headers.items() if k in ['subject', 'from', 'to', 'date', 'message-id']},  # Minimal headers
+                                        'associated_contact': contact_email,
+                                        'sync_method': 'contact_time_based_resource_managed'
+                                    }
+                                    
+                                    # Store email with minimal content to save space
+                                    storage_manager.postgres.store_email(
+                                        user_id=user_id,
+                                        gmail_id=msg['id'],
+                                        content=f"Email metadata sync - Subject: {subject}",  # Minimal content
+                                        metadata=metadata,
+                                        timestamp=date_sent
+                                    )
+                                    new_emails += 1
+                                    processed_count += 1
+                                    
+                                    # Throttle to avoid quota issues
+                                    time.sleep(0.05)
+                                    
+                                except Exception as e:
+                                    logger.error(f"Error processing email {msg.get('id')} for contact {contact_email}: {e}")
                                     continue
-                                
-                                # Extract body
-                                body_text = ""
-                                if 'payload' in msg_data:
-                                    payload = msg_data['payload']
-                                    if 'parts' in payload:
-                                        for part in payload['parts']:
-                                            if part.get('mimeType') == 'text/plain' and 'body' in part and 'data' in part['body']:
-                                                try:
-                                                    body_text = base64.urlsafe_b64decode(
-                                                        part['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                                                    break
-                                                except:
-                                                    pass
-                                    elif 'body' in payload and 'data' in payload['body']:
-                                        if payload.get('mimeType') == 'text/plain':
-                                            try:
-                                                body_text = base64.urlsafe_b64decode(
-                                                    payload['body']['data'].encode('ASCII')).decode('utf-8', errors='replace')
-                                            except:
-                                                pass
-                                
-                                # Store email with contact context
-                                metadata = {
-                                    'subject': subject,
-                                    'from': from_addr,
-                                    'to': to_addr,
-                                    'date': date_str,
-                                    'headers': headers,
-                                    'associated_contact': contact_email,
-                                    'sync_method': 'contact_time_based_background'
-                                }
-                                
-                                # Store new email
-                                storage_manager.postgres.store_email(
-                                    user_id=user_id,
-                                    gmail_id=msg['id'],
-                                    content=body_text,
-                                    metadata=metadata,
-                                    timestamp=date_sent
-                                )
-                                new_emails += 1
-                                processed_count += 1
-                                
-                                # Throttle to avoid quota issues
-                                time.sleep(0.05)
-                                
-                            except Exception as e:
-                                logger.error(f"Error processing email {msg.get('id')} for contact {contact_email}: {e}")
-                                continue
+                            
+                            # Force garbage collection after each chunk
+                            gc.collect()
+                            
+                            # Throttle between chunks
+                            time.sleep(0.1)
                         
                         # Throttle between contacts
                         time.sleep(0.2)
                         
                     except Exception as e:
                         logger.error(f"Error processing contact {contact_email}: {e}")
+                        skipped_contacts += 1
                         continue
                 
-                # Final status update
+                # Final status update with comprehensive results
+                final_message = f'Email sync complete! Synced {new_emails} emails from {contacts_processed} contacts'
+                if skipped_contacts > 0:
+                    final_message += f' ({skipped_contacts} contacts skipped due to errors)'
+                if time.time() - start_time > MAX_TOTAL_RUNTIME * 0.9:
+                    final_message += ' (stopped due to time limit)'
+                
                 with jobs_lock:
                     if job_id in background_jobs:
                         background_jobs[job_id]['status'] = 'completed'
                         background_jobs[job_id]['progress'] = 100
-                        background_jobs[job_id]['message'] = f'Email sync complete! Synced {new_emails} emails from {contacts_processed} contacts'
+                        background_jobs[job_id]['message'] = final_message
                         background_jobs[job_id]['emails_synced'] = new_emails
                         background_jobs[job_id]['contacts_processed'] = contacts_processed
+                        background_jobs[job_id]['contacts_skipped'] = skipped_contacts
+                        background_jobs[job_id]['runtime_seconds'] = int(time.time() - start_time)
                         background_jobs[job_id]['completed_at'] = time.time()
+                        # Structure the result properly for React Modal
+                        background_jobs[job_id]['result'] = {
+                            'success': True,
+                            'emails': [],  # Will be populated by inspect endpoint
+                            'total_emails': new_emails,
+                            'contacts_processed': contacts_processed,
+                            'contacts_skipped': skipped_contacts,
+                            'runtime_seconds': int(time.time() - start_time),
+                            'sync_method': 'resource_managed_background'
+                        }
                 
-                logger.info(f"Email sync completed for user {user_email} using time-based contact filtering", 
+                logger.info(f"Email sync completed for user {user_email} using resource-managed approach", 
                            processed=processed_count, new=new_emails, updated=updated_emails, 
-                           contacts_processed=contacts_processed, target_contacts=len(target_contacts))
+                           contacts_processed=contacts_processed, skipped=skipped_contacts,
+                           runtime=int(time.time() - start_time))
                 
             except Exception as e:
                 logger.error(f"Background email sync job {job_id} failed: {str(e)}")
@@ -884,6 +922,7 @@ def sync_emails():
                     if job_id in background_jobs:
                         background_jobs[job_id]['status'] = 'failed'
                         background_jobs[job_id]['message'] = f'Email sync failed: {str(e)}'
+                        background_jobs[job_id]['error_details'] = str(e)
         
         # Start background thread
         import threading
