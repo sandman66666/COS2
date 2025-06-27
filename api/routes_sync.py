@@ -616,6 +616,20 @@ def sync_emails():
         
         def background_email_sync():
             try:
+                # Required imports for Gmail integration
+                from datetime import datetime, timedelta, timezone
+                from google.oauth2.credentials import Credentials
+                from googleapiclient.discovery import build
+                import email.utils
+                import base64
+                import time
+                
+                # Configuration constants
+                MAX_TOTAL_RUNTIME = 7200  # 2 hours maximum runtime
+                MAX_EMAILS_PER_CONTACT = 50  # Max emails per contact to avoid overwhelming
+                CHUNK_SIZE = 10  # Process emails in chunks to manage memory
+                start_time = time.time()  # Track start time for runtime limits
+                
                 # Update to show more detailed progress
                 update_job_progress(job_id, 0, 'Initializing email sync...', {
                     'sync_phase': 'initialization',
