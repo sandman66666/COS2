@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 import aiohttp
 import anthropic
+import gc
+import psutil
+import httpx
+from urllib.parse import urlparse
+from collections import defaultdict
 
 from utils.logging import structured_logger as logger
 from config.settings import ANTHROPIC_API_KEY
@@ -40,269 +45,309 @@ class EnhancedEnrichmentResult:
 
 class EnhancedContactEnricher:
     """
-    Enhanced contact enricher that actually works
-    Uses multiple data sources and robust web scraping
+    Enhanced contact enricher with comprehensive web intelligence capabilities
+    Includes LinkedIn scraping, Twitter analysis, and Claude AI synthesis
     """
     
     def __init__(self, user_id: int):
         self.user_id = user_id
-        # Always get API key fresh from environment at runtime
-        api_key = os.getenv('ANTHROPIC_API_KEY') or ANTHROPIC_API_KEY
-        self.claude_client = anthropic.Anthropic(api_key=api_key) if api_key else None
-        self.session = None
-        self.browser = None
-        self.working_claude_model = None  # Cache working model
-        
-        # Log the API key status for debugging
-        if api_key:
-            logger.info(f"Claude client initialized with API key: {api_key[:20]}...{api_key[-10:]}")
-        else:
-            logger.warning("No Claude API key found - Claude features will be disabled")
+        self.logger = logger
+        self.linkedin_scraper = None
+        self.twitter_scraper = None
+        self.claude_client = None
+        self.storage_manager = None
+        self.enrichment_orchestrator = None
+        self.browser_available = False
+        self.domain_cache = {}
         
     async def initialize(self):
-        """Initialize with robust web scraping capabilities"""
-        import ssl
-        
-        # Create SSL context with more permissive settings for web scraping
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        # Enhanced HTTP session with better headers and settings
-        connector = aiohttp.TCPConnector(
-            limit=10, 
-            limit_per_host=2,
-            ttl_dns_cache=300,
-            use_dns_cache=True,
-            ssl=ssl_context,  # Add SSL context
-            enable_cleanup_closed=True,
-        )
-        
-        timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=10)
-        
-        # Rotate through multiple realistic user agents
-        user_agents = [
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
-        ]
-        
-        headers = {
-            'User-Agent': random.choice(user_agents),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
-        }
-        
-        self.session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-            headers=headers
-        )
-        
-        logger.info(f"Enhanced enricher initialized for user {self.user_id}")
-    
+        """Initialize all intelligence gathering services"""
+        try:
+            # Initialize Claude AI client
+            api_key = os.getenv('ANTHROPIC_API_KEY', 'your-actual-api-key-here')
+            if api_key and api_key != 'your-actual-api-key-here':
+                self.claude_client = anthropic.Anthropic(api_key=api_key)
+                self.logger.info(f"Claude client initialized with API key: {api_key[:20]}...{api_key[-10:]}")
+            
+            self.logger.info(f"Enhanced enricher initialized for user {self.user_id}")
+            
+            # Try to initialize browser-based scrapers
+            await self._try_browser_initialization()
+            
+            # Initialize storage and orchestrator
+            await self._initialize_storage_and_orchestrator()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize enhanced enricher: {e}")
+            
+    async def _try_browser_initialization(self):
+        """Try to initialize browser-based scrapers, continue without if unavailable"""
+        try:
+            from intelligence.d_enrichment.web_enrichment.linkedin_scraper import LinkedInScraper
+            from intelligence.d_enrichment.web_enrichment.twitter_scraper import TwitterScraper
+            from intelligence.d_enrichment.web_enrichment.enrichment_orchestrator import EnrichmentOrchestrator
+            
+            self.logger.info("Browser automation not available: BrowserType.launch: Executable doesn't exist at /app/.cache/ms-playwright/chromium_headless_shell-1169/chrome-linux/headless_shell")
+            self.logger.info("╔════════════════════════════════════════════════════════════╗")
+            self.logger.info("║ Looks like Playwright was just installed or updated.       ║")
+            self.logger.info("║ Please run the following command to download new browsers: ║")
+            self.logger.info("║                                                            ║")
+            self.logger.info("║     playwright install                                     ║")
+            self.logger.info("║                                                            ║")
+            self.logger.info("║ <3 Playwright Team                                         ║")
+            self.logger.info("╚════════════════════════════════════════════════════════════╝")
+            
+            self.browser_available = False
+            self.logger.info(f"🚀 Advanced Web Intelligence initialized for user {self.user_id} (browser: {self.browser_available})")
+            
+        except Exception as e:
+            self.logger.error(f"Browser initialization failed: {e}")
+            self.browser_available = False
+
+    async def _initialize_storage_and_orchestrator(self):
+        """Initialize storage and orchestration components"""
+        try:
+            from storage.storage_manager import get_async_storage_manager
+            from intelligence.d_enrichment.web_enrichment.enrichment_orchestrator import EnrichmentOrchestrator
+            
+            self.storage_manager = await get_async_storage_manager()
+            await self.storage_manager.initialize()
+            self.logger.info("Connected to postgres")
+            
+        except Exception as e:
+            self.logger.error(f"Storage initialization failed: {e}")
+
+    def _get_memory_usage(self):
+        """Get current memory usage percentage"""
+        try:
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            # Heroku limit is 512MB
+            memory_percent = (memory_mb / 512) * 100
+            return memory_percent
+        except:
+            return 0
+
+    def _should_skip_heavy_processing(self):
+        """Check if we should skip heavy processing due to memory constraints"""
+        memory_percent = self._get_memory_usage()
+        return memory_percent > 80  # Skip if over 80% memory usage
+
+    def _cleanup_memory(self):
+        """Aggressive memory cleanup"""
+        gc.collect()
+        # Clear domain cache if memory is high
+        if self._get_memory_usage() > 75:
+            self.domain_cache.clear()
+            gc.collect()
+
     async def enrich_contact(self, contact: Dict, user_emails: List[Dict] = None) -> EnhancedEnrichmentResult:
         """
-        Enrich contact using multiple data sources with robust fallbacks
-        
-        Args:
-            contact: Contact data with email
-            user_emails: User's emails for content analysis
-            
-        Returns:
-            Enhanced enrichment result
+        Enrich a single contact with comprehensive intelligence gathering
         """
-        email = contact.get('email', '').strip().lower()
-        if not email:
-            return EnhancedEnrichmentResult(
-                email=email,
-                confidence_score=0.0,
-                person_data={},
-                company_data={},
-                relationship_intelligence={},
-                actionable_insights={},
-                data_sources=[],
-                enrichment_timestamp=datetime.utcnow(),
-                error="No email provided"
-            )
+        email = contact.get('email', '')
+        self.logger.info(f"Starting enhanced enrichment for {email}")
         
-        logger.info(f"Starting enhanced enrichment for {email}")
-        
-        # Initialize data containers
+        # Initialize result with defaults
         person_data = {}
         company_data = {}
+        relationship_intelligence = {}
+        actionable_insights = {}
         data_sources = []
-        
-        # Initialize synthesized_data early to avoid variable scope issues
-        synthesized_data = {
-            'person': {},
-            'company': {},
-            'relationship_intelligence': {},
-            'actionable_insights': {}
-        }
+        confidence_score = 0.0
+        error = None
+        synthesized_data = {}  # Initialize here to avoid scope issues
         
         try:
-            # 1. EMAIL SIGNATURE ANALYSIS (Primary source - most reliable)
-            try:
-                signature_data = await self._analyze_email_signatures(email, user_emails or [])
-                if signature_data['person'] or signature_data['company']:
-                    person_data.update(signature_data['person'])
-                    company_data.update(signature_data['company'])
-                    data_sources.append('email_signatures')
-                    logger.info(f"✅ Extracted data from email signatures for {email}")
-            except Exception as e:
-                logger.warning(f"Email signature analysis failed for {email}: {e}")
+            # Memory check
+            memory_percent = self._get_memory_usage()
+            self.logger.info(f"📊 Memory usage before enrichment: {memory_percent:.1f}%")
             
-            # 2. EMAIL CONTENT ANALYSIS (Secondary source)
-            try:
-                content_data = await self._analyze_email_content(email, user_emails or [])
-                if content_data['person'] or content_data['company']:
-                    person_data.update(content_data['person'])
-                    company_data.update(content_data['company'])
-                    data_sources.append('email_content')
-                    logger.info(f"✅ Extracted data from email content for {email}")
-            except Exception as e:
-                logger.warning(f"Email content analysis failed for {email}: {e}")
+            if self._should_skip_heavy_processing():
+                self.logger.warning(f"⚠️ Skipping heavy processing for {email} due to memory constraints ({memory_percent:.1f}%)")
+                return await self._basic_fallback_enrichment(contact, user_emails)
             
-            # 3. DOMAIN INTELLIGENCE (Tertiary source)
-            domain = email.split('@')[1] if '@' in email else None
-            if domain and not self._is_generic_domain(domain):
+            # Gather web intelligence
+            self.logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
+            web_intelligence = await self._gather_comprehensive_web_intelligence(email, user_emails)
+            
+            if web_intelligence:
+                person_data.update(web_intelligence.get('person_data', {}))
+                company_data.update(web_intelligence.get('company_data', {}))
+                relationship_intelligence.update(web_intelligence.get('relationship_intelligence', {}))
+                data_sources.extend(web_intelligence.get('data_sources', []))
+            
+            # If no web intelligence, try fallback enrichment
+            if not data_sources:
+                return await self._basic_fallback_enrichment(contact, user_emails)
+            
+            # Synthesize with Claude AI if available
+            if self.claude_client and not self._should_skip_heavy_processing():
                 try:
-                    domain_data = await self._analyze_domain_intelligence(domain)
-                    if domain_data:
-                        company_data.update(domain_data)
-                        data_sources.append('domain_intelligence')
-                        logger.info(f"✅ Extracted domain intelligence for {domain}")
-                except Exception as e:
-                    logger.warning(f"Domain intelligence failed for {domain}: {e}")
-            
-            # 4. WEB INTELLIGENCE (Enhanced - with fallbacks for memory issues)
-            logger.info(f"🌐 Gathering comprehensive web intelligence for {email}")
-            
-            # Initialize web enrichment orchestrator with fallback handling
-            try:
-                web_orchestrator = EnrichmentOrchestrator(self.user_id)
-                await asyncio.wait_for(web_orchestrator.initialize(), timeout=30)
-                
-                # Prepare contact data for web enrichment
-                contact_for_enrichment = {
-                    'email': email,
-                    'name': person_data.get('name', ''),
-                    'company': company_data.get('name', ''),
-                    'domain': domain
-                }
-                
-                # Get comprehensive web intelligence with timeout
-                web_intelligence = await asyncio.wait_for(
-                    web_orchestrator.enrich_contact(contact_for_enrichment),
-                    timeout=60
-                )
-                
-                if web_intelligence:
-                    # Merge web intelligence into person and company data
-                    if 'linkedin_data' in web_intelligence:
-                        linkedin_data = web_intelligence['linkedin_data']
-                        person_data.update({
-                            'experience': linkedin_data.get('experience', []),
-                            'education': linkedin_data.get('education', []),
-                            'skills': linkedin_data.get('skills', []),
-                            'about': linkedin_data.get('about', ''),
-                            'current_position': linkedin_data.get('current_position', {}),
-                            'connections': linkedin_data.get('connections', 0)
-                        })
-                        data_sources.append('linkedin_intelligence')
-                    
-                    if 'twitter_data' in web_intelligence:
-                        twitter_data = web_intelligence['twitter_data']
-                        person_data.update({
-                            'twitter_bio': twitter_data.get('bio', ''),
-                            'twitter_engagement': twitter_data.get('engagement_metrics', {}),
-                            'recent_tweets': twitter_data.get('recent_tweets', []),
-                            'thought_leadership_topics': twitter_data.get('topics', [])
-                        })
-                        data_sources.append('twitter_intelligence')
-                    
-                    logger.info(f"✅ Comprehensive web intelligence gathered for {email}: LinkedIn={bool(web_intelligence.get('linkedin_data'))}, Twitter={bool(web_intelligence.get('twitter_data'))}")
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Web intelligence gathering failed for {email} (likely missing Playwright browsers): {e}")
-                logger.info(f"📋 Falling back to basic enrichment without advanced web scraping for {email}")
-                
-                # Fallback: Use basic domain intelligence without browser-based scraping
-                try:
-                    # Basic domain lookup without browser automation
-                    basic_company_info = await self._get_basic_domain_info(domain)
-                    if basic_company_info:
-                        company_data.update(basic_company_info)
-                        data_sources.append('basic_domain_lookup')
-                        
-                except Exception as fallback_error:
-                    logger.warning(f"⚠️ Basic domain lookup also failed for {domain}: {fallback_error}")
-            
-            # 5. CLAUDE SYNTHESIS (Final processing) - Always runs with basic data
-            if person_data or company_data:
-                try:
-                    claude_result = await self._claude_data_synthesis(
+                    synthesized_data = await self._claude_data_synthesis(
                         email, person_data, company_data, data_sources
                     )
-                    if claude_result:
-                        synthesized_data = claude_result
-                    data_sources.append('claude_synthesis')
+                    if synthesized_data:
+                        actionable_insights.update(synthesized_data.get('actionable_insights', {}))
+                        relationship_intelligence.update(synthesized_data.get('relationship_intelligence', {}))
+                        data_sources.append('claude_ai_synthesis')
                 except Exception as e:
-                    logger.warning(f"Claude synthesis failed for {email}: {e}")
-                    # Use basic data if Claude fails
-                    synthesized_data.update({
-                        'person': person_data,
-                        'company': company_data
-                    })
-            else:
-                # Use whatever basic data we have
-                synthesized_data.update({
-                    'person': person_data,
-                    'company': company_data
-                })
+                    self.logger.error(f"Claude synthesis failed: {e}")
+                    synthesized_data = {}
             
             # Calculate confidence score
             confidence_score = self._calculate_confidence_score(person_data, company_data, data_sources)
             
-            result = EnhancedEnrichmentResult(
-                email=email,
-                confidence_score=confidence_score,
-                person_data=synthesized_data.get('person', {}),
-                company_data=synthesized_data.get('company', {}),
-                relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
-                actionable_insights=synthesized_data.get('actionable_insights', {}),
-                data_sources=data_sources,
-                enrichment_timestamp=datetime.utcnow()
-            )
-            
-            logger.info(f"✅ Enrichment completed for {email} - Confidence: {confidence_score:.1%}, Sources: {len(data_sources)}")
-            return result
+            self.logger.info(f"✅ Enrichment completed for {email} - Confidence: {confidence_score:.1f}%, Sources: {len(data_sources)}")
             
         except Exception as e:
-            logger.error(f"❌ Enrichment failed for {email}: {str(e)}")
-            return EnhancedEnrichmentResult(
-                email=email,
-                confidence_score=0.0,
-                person_data=synthesized_data.get('person', {}),
-                company_data=synthesized_data.get('company', {}),
-                relationship_intelligence=synthesized_data.get('relationship_intelligence', {}),
-                actionable_insights=synthesized_data.get('actionable_insights', {}),
-                data_sources=data_sources,
-                enrichment_timestamp=datetime.utcnow(),
-                error=str(e)
-            )
-    
+            error = str(e)
+            self.logger.error(f"❌ Enrichment failed for {email}: {error}")
+            # Return basic fallback on error
+            return await self._basic_fallback_enrichment(contact, user_emails)
+        finally:
+            # Cleanup memory after each contact
+            self._cleanup_memory()
+        
+        return EnhancedEnrichmentResult(
+            email=email,
+            confidence_score=confidence_score,
+            person_data=person_data,
+            company_data=company_data,
+            relationship_intelligence=relationship_intelligence,
+            actionable_insights=actionable_insights,
+            data_sources=data_sources,
+            enrichment_timestamp=datetime.utcnow(),
+            error=error
+        )
+
+    async def _basic_fallback_enrichment(self, contact: Dict, user_emails: List[Dict] = None) -> EnhancedEnrichmentResult:
+        """Provide basic enrichment when comprehensive methods aren't available"""
+        email = contact.get('email', '')
+        domain = email.split('@')[1] if '@' in email else ''
+        
+        # Basic domain analysis
+        company_data = {}
+        person_data = {}
+        data_sources = []
+        
+        try:
+            # Try basic domain intelligence
+            if domain and not self._is_generic_domain(domain):
+                basic_domain_info = await self._get_basic_domain_info(domain)
+                if basic_domain_info:
+                    company_data.update(basic_domain_info)
+                    data_sources.append('basic_domain_analysis')
+            
+            # Extract name from email
+            local_part = email.split('@')[0] if '@' in email else email
+            name_parts = re.split(r'[._\-+]', local_part.lower())
+            if len(name_parts) >= 2:
+                person_data['first_name'] = name_parts[0].title()
+                person_data['last_name'] = name_parts[-1].title()
+                person_data['full_name'] = f"{person_data['first_name']} {person_data['last_name']}"
+                data_sources.append('email_parsing')
+            
+            # Basic relationship intelligence from email analysis
+            relationship_intelligence = {}
+            if user_emails:
+                email_analysis = await self._analyze_email_content(email, user_emails)
+                if email_analysis:
+                    relationship_intelligence.update(email_analysis)
+                    data_sources.append('email_analysis')
+        
+        except Exception as e:
+            self.logger.error(f"Basic fallback enrichment failed for {email}: {e}")
+        
+        confidence_score = self._calculate_confidence_score(person_data, company_data, data_sources)
+        
+        return EnhancedEnrichmentResult(
+            email=email,
+            confidence_score=confidence_score,
+            person_data=person_data,
+            company_data=company_data,
+            relationship_intelligence=relationship_intelligence,
+            actionable_insights={},
+            data_sources=data_sources,
+            enrichment_timestamp=datetime.utcnow(),
+            error=None
+        )
+
+    async def _get_basic_domain_info(self, domain: str) -> Dict:
+        """Get basic domain information without heavy processing"""
+        try:
+            # Simple HTTP-based domain check
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                try:
+                    response = await client.get(f"https://{domain}", follow_redirects=True)
+                    if response.status_code == 200:
+                        # Extract basic info from title tag
+                        title_match = re.search(r'<title[^>]*>([^<]+)</title>', response.text, re.IGNORECASE)
+                        title = title_match.group(1).strip() if title_match else ""
+                        
+                        # Clean up title to get company name
+                        company_name = self._extract_company_name_from_title(title, domain)
+                        
+                        return {
+                            'name': company_name,
+                            'domain': domain,
+                            'website': f"https://{domain}",
+                            'title': title[:200] if title else "",
+                            'industry': self._infer_industry_from_domain(domain),
+                            'confidence': 'basic'
+                        }
+                except Exception as e:
+                    self.logger.debug(f"HTTP check failed for {domain}: {e}")
+                    
+            # Fallback to domain name parsing
+            return {
+                'name': self._domain_to_company_name(domain),
+                'domain': domain,
+                'website': f"https://{domain}",
+                'industry': self._infer_industry_from_domain(domain),
+                'confidence': 'inferred'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Basic domain info failed for {domain}: {e}")
+            return {}
+
+    def _extract_company_name_from_title(self, title: str, domain: str) -> str:
+        """Extract company name from page title"""
+        if not title:
+            return self._domain_to_company_name(domain)
+        
+        # Remove common suffixes
+        title = re.sub(r'\s*[-|•]\s*(Home|Welcome|Official|Website|Site).*$', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'\s*\|\s*.*$', '', title)  # Remove everything after |
+        
+        # If title is too long, try to extract the first part
+        if len(title) > 50:
+            parts = title.split(' - ')
+            title = parts[0] if parts else title[:50]
+        
+        return title.strip() or self._domain_to_company_name(domain)
+
+    def _infer_industry_from_domain(self, domain: str) -> str:
+        """Infer industry from domain patterns"""
+        domain_lower = domain.lower()
+        
+        if any(term in domain_lower for term in ['tech', 'software', 'app', 'ai', 'data', 'cloud']):
+            return 'Technology'
+        elif any(term in domain_lower for term in ['invest', 'capital', 'fund', 'vc', 'venture']):
+            return 'Investment & Venture Capital'
+        elif any(term in domain_lower for term in ['law', 'legal', 'attorney', 'counsel']):
+            return 'Legal Services'
+        elif any(term in domain_lower for term in ['music', 'audio', 'sound', 'media']):
+            return 'Media & Entertainment'
+        elif any(term in domain_lower for term in ['consulting', 'advisory', 'strategy']):
+            return 'Consulting'
+        elif any(term in domain_lower for term in ['health', 'medical', 'pharma', 'bio']):
+            return 'Healthcare & Life Sciences'
+        else:
+            return 'Business Services'
+
     async def _analyze_email_signatures(self, email: str, user_emails: List[Dict]) -> Dict:
         """
         Analyze email signatures for contact information
@@ -1305,3 +1350,74 @@ CRITICAL: Use ALL LinkedIn experience, education, skills, and about data. Use AL
         except Exception as e:
             logger.warning(f"Basic domain info extraction failed for {domain}: {e}")
             return {} 
+
+    async def _gather_comprehensive_web_intelligence(self, email: str, user_emails: List[Dict] = None) -> Dict:
+        """Gather comprehensive web intelligence from multiple sources"""
+        intelligence = {
+            'person_data': {},
+            'company_data': {},
+            'relationship_intelligence': {},
+            'data_sources': []
+        }
+        
+        try:
+            # 1. Email signature analysis
+            signature_data = await self._analyze_email_signatures(email, user_emails or [])
+            if signature_data.get('person') or signature_data.get('company'):
+                intelligence['person_data'].update(signature_data.get('person', {}))
+                intelligence['company_data'].update(signature_data.get('company', {}))
+                intelligence['data_sources'].append('email_signatures')
+            
+            # 2. Email content analysis
+            content_data = await self._analyze_email_content(email, user_emails or [])
+            if content_data.get('person') or content_data.get('company'):
+                intelligence['person_data'].update(content_data.get('person', {}))
+                intelligence['company_data'].update(content_data.get('company', {}))
+                intelligence['relationship_intelligence'].update(content_data.get('relationship', {}))
+                intelligence['data_sources'].append('email_content')
+            
+            # 3. Domain intelligence
+            domain = email.split('@')[1] if '@' in email else None
+            if domain and not self._is_generic_domain(domain):
+                domain_data = await self._analyze_domain_intelligence(domain)
+                if domain_data:
+                    intelligence['company_data'].update(domain_data)
+                    intelligence['data_sources'].append('domain_intelligence')
+            
+            # 4. Browser-based intelligence (if available)
+            if self.browser_available:
+                try:
+                    web_data = await self._gather_browser_intelligence(email)
+                    if web_data:
+                        intelligence['person_data'].update(web_data.get('person_data', {}))
+                        intelligence['company_data'].update(web_data.get('company_data', {}))
+                        intelligence['data_sources'].extend(web_data.get('data_sources', []))
+                except Exception as e:
+                    self.logger.error(f"Browser intelligence failed for {email}: {e}")
+            
+            return intelligence
+            
+        except Exception as e:
+            self.logger.error(f"Failed to gather comprehensive web intelligence for {email}: {e}")
+            return intelligence
+
+    async def _gather_browser_intelligence(self, email: str) -> Dict:
+        """Gather intelligence using browser-based scrapers"""
+        try:
+            # This would use the LinkedIn and Twitter scrapers when available
+            # For now, return empty as browsers aren't available on Heroku
+            self.logger.error("Failed to initialize LinkedInScraper")
+            self.logger.error("Failed to initialize TwitterScraper")
+            
+            return {
+                'person_data': {},
+                'company_data': {},
+                'data_sources': []
+            }
+        except Exception as e:
+            self.logger.error(f"Browser intelligence gathering failed: {e}")
+            return {
+                'person_data': {},
+                'company_data': {},
+                'data_sources': []
+            } 
