@@ -1556,11 +1556,39 @@ def enrich_contacts():
 
         # Start background thread
         import threading
-        thread = threading.Thread(target=background_contact_enrichment)
-        thread.daemon = True
-        thread.start()
+        logger.info(f"🔧 MAIN THREAD: About to create background thread for job {job_id}")
         
-        logger.info(f"Started background contact enrichment job {job_id} for user {user_email}")
+        try:
+            thread = threading.Thread(target=background_contact_enrichment)
+            logger.info(f"🔧 MAIN THREAD: Thread created successfully for job {job_id}")
+            
+            thread.daemon = True
+            logger.info(f"🔧 MAIN THREAD: Thread set to daemon mode for job {job_id}")
+            
+            thread.start()
+            logger.info(f"🔧 MAIN THREAD: Thread.start() called successfully for job {job_id}")
+            
+            # Give the thread a moment to start
+            import time
+            time.sleep(0.1)
+            
+            if thread.is_alive():
+                logger.info(f"🔧 MAIN THREAD: Thread is confirmed alive for job {job_id}")
+            else:
+                logger.error(f"🔧 MAIN THREAD: Thread is NOT alive after start() for job {job_id}")
+                
+        except Exception as thread_error:
+            logger.error(f"🔧 MAIN THREAD: FAILED to create/start thread for job {job_id}: {thread_error}")
+            logger.error(f"🔧 MAIN THREAD: Thread error type: {type(thread_error).__name__}")
+            logger.error(f"🔧 MAIN THREAD: Thread error args: {thread_error.args}")
+            complete_job(job_id, False, f'Failed to start background thread: {str(thread_error)}')
+            return jsonify({
+                'success': False,
+                'error': f'Failed to start background thread: {str(thread_error)}',
+                'mode': 'synchronous'
+            }), 500
+        
+        logger.info(f"🔧 MAIN THREAD: Started background contact enrichment job {job_id} for user {user_email}")
         
         return jsonify({
             'success': True,
