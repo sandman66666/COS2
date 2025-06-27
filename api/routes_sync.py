@@ -2796,4 +2796,34 @@ def get_user_jobs():
         logger.error(f"Error getting user jobs: {e}")
         return jsonify({'error': str(e)}), 500
 
+@api_sync_bp.route('/cancel-job/<job_id>', methods=['POST'])
+@require_auth
+def cancel_job(job_id):
+    """Cancel a running background job"""
+    try:
+        if job_id in background_jobs:
+            background_jobs[job_id]['status'] = 'cancelled'
+            background_jobs[job_id]['message'] = 'Job cancelled by user'
+            background_jobs[job_id]['completed_at'] = time.time()
+            
+            logger.info(f"Job {job_id} cancelled by user")
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Job {job_id} has been cancelled',
+                'job_status': background_jobs[job_id]
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Job {job_id} not found'
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"Error cancelling job {job_id}: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to cancel job: {str(e)}'
+        }), 500
+
 # ===== UTILITY FUNCTIONS =====
