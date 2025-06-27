@@ -15,7 +15,7 @@ export const pollJobStatus = async (
 ): Promise<any> => {
   console.log(`🔍 Polling status for job ${jobId}`);
   
-  const maxPolls = 120; // 10 minutes max (every 5 seconds)
+  const maxPolls = 1440; // 2 hours max (every 5 seconds) - contact enrichment can take very long for comprehensive intelligence
   let pollCount = 0;
   
   while (pollCount < maxPolls) {
@@ -53,10 +53,10 @@ export const pollJobStatus = async (
       pollCount++;
       
       if (pollCount >= maxPolls) {
-        throw new Error('Job polling timeout');
+        throw new Error('Contact enrichment timeout - comprehensive intelligence gathering can take up to 2 hours. Job will continue running in background.');
       }
     }
   }
   
-  throw new Error('Job polling timeout - maximum attempts reached');
+  throw new Error('Contact enrichment timeout - comprehensive intelligence gathering can take up to 2 hours. Job will continue running in background.');
 }; 

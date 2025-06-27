@@ -1213,7 +1213,14 @@ def analyze_sent_emails():
 @api_sync_bp.route('/intelligence/enrich-contacts', methods=['POST'])
 @require_auth  
 def enrich_contacts():
-    """Contact enrichment with advanced web intelligence (synchronous background job)"""
+    """
+    Contact enrichment with advanced web intelligence (synchronous background job)
+    
+    TODO: FUTURE OPTIMIZATION - Centralized Contact Repository
+    Currently takes up to 2 hours because we re-enrich the same contacts for each user.
+    Solution: Global contact_intelligence cache to reuse enrichment data across users.
+    Impact: 90% faster enrichment, 95% cost reduction, better data consistency.
+    """
     try:
         user_email = session.get('user_id', 'test@session-42.com')
         request_data = request.get_json() or {}

@@ -1,6 +1,10 @@
 // User Authentication Functions
 console.log('🔧 Dashboard.js script loaded!');
 
+// IMMEDIATE TEST - This should show an alert when the page loads
+alert('🚨 JAVASCRIPT TEST: Dashboard.js is loading!');
+console.log('🚨 JAVASCRIPT TEST: Dashboard.js is loading!');
+
 async function loadUserInfo() {
     try {
         const response = await fetch('/api/user-info');
@@ -5857,7 +5861,7 @@ function resetPipeline() {
 async function pollJobStatus(jobId, statusUrl, stepId) {
     console.log(`🔍 Polling status for job ${jobId}`);
     
-    const maxPolls = 120; // 10 minutes max (every 5 seconds)
+    const maxPolls = 1440; // 2 hours max (every 5 seconds) - contact enrichment can take very long for comprehensive intelligence
     let pollCount = 0;
     
     while (pollCount < maxPolls) {
@@ -5919,7 +5923,7 @@ async function pollJobStatus(jobId, statusUrl, stepId) {
     }
     
     // Timeout
-    throw new Error(`Job ${jobId} timed out after ${maxPolls * 5} seconds`);
+    throw new Error(`Contact enrichment timeout - comprehensive intelligence gathering can take up to 2 hours. Job ${jobId} will continue running in background.`);
 }
 
 // Initialize the dashboard when the page loads

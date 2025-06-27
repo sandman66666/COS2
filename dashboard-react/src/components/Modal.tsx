@@ -537,25 +537,65 @@ const Modal: React.FC<ModalProps> = ({ stepId, stepName, data, onClose }) => {
                               
                               {contact.metadata.enrichment_data.person_data && (
                                 <DetailSection>
-                                  <DetailTitle>👤 Personal Info</DetailTitle>
+                                  <DetailTitle>👤 Professional Intelligence</DetailTitle>
                                   <DetailItem>
                                     <DetailLabel>Name:</DetailLabel>
-                                    <DetailValue>{contact.metadata.enrichment_data.person_data.name || 'Unknown'}</DetailValue>
+                                    <DetailValue>{contact.metadata.enrichment_data.person_data.name || contact.metadata.enrichment_data.person_data.current_title || 'Unknown'}</DetailValue>
                                   </DetailItem>
                                   <DetailItem>
-                                    <DetailLabel>Title:</DetailLabel>
-                                    <DetailValue>{contact.metadata.enrichment_data.person_data.current_title || 'Unknown'}</DetailValue>
+                                    <DetailLabel>Current Title:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.person_data.current_title || contact.metadata.enrichment_data.person_data.title || 'Unknown'}</DetailValue>
                                   </DetailItem>
                                   <DetailItem>
                                     <DetailLabel>Career Stage:</DetailLabel>
                                     <DetailValue>{contact.metadata.enrichment_data.person_data.career_stage || 'Unknown'}</DetailValue>
                                   </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Seniority Level:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.person_data.seniority_level || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  
+                                  {/* Professional Background */}
+                                  {contact.metadata.enrichment_data.person_data.professional_background && (
+                                    <>
+                                      <DetailItem>
+                                        <DetailLabel>Years Experience:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.person_data.professional_background.years_experience || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                      <DetailItem>
+                                        <DetailLabel>Industry Expertise:</DetailLabel>
+                                        <DetailValue>{(contact.metadata.enrichment_data.person_data.professional_background.industry_expertise || []).join(', ') || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                    </>
+                                  )}
+                                  
+                                  {/* Investment Focus */}
+                                  {contact.metadata.enrichment_data.person_data.current_focus && (
+                                    <DetailItem>
+                                      <DetailLabel>Investment Thesis:</DetailLabel>
+                                      <DetailValue>{contact.metadata.enrichment_data.person_data.current_focus.investment_thesis || 'Unknown'}</DetailValue>
+                                    </DetailItem>
+                                  )}
+                                  
+                                  {/* Value Proposition */}
+                                  {contact.metadata.enrichment_data.person_data.value_proposition && (
+                                    <>
+                                      <DetailItem>
+                                        <DetailLabel>Decision Authority:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.person_data.value_proposition.decision_authority || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                      <DetailItem>
+                                        <DetailLabel>Network Value:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.person_data.value_proposition.network_value || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                    </>
+                                  )}
                                 </DetailSection>
                               )}
                               
                               {contact.metadata.enrichment_data.company_data && (
                                 <DetailSection>
-                                  <DetailTitle>🏢 Company Info</DetailTitle>
+                                  <DetailTitle>🏢 Company Intelligence</DetailTitle>
                                   <DetailItem>
                                     <DetailLabel>Company:</DetailLabel>
                                     <DetailValue>{contact.metadata.enrichment_data.company_data.name || 'Unknown'}</DetailValue>
@@ -564,19 +604,121 @@ const Modal: React.FC<ModalProps> = ({ stepId, stepName, data, onClose }) => {
                                     <DetailLabel>Industry:</DetailLabel>
                                     <DetailValue>{contact.metadata.enrichment_data.company_data.industry || 'Unknown'}</DetailValue>
                                   </DetailItem>
+                                  
+                                  {/* Company Profile */}
+                                  {contact.metadata.enrichment_data.company_data.company_profile && (
+                                    <>
+                                      <DetailItem>
+                                        <DetailLabel>Company Stage:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.company_data.company_profile.company_stage || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                      <DetailItem>
+                                        <DetailLabel>Business Model:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.company_data.company_profile.business_model || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                    </>
+                                  )}
+                                  
+                                  {/* Financial Intelligence */}
+                                  {contact.metadata.enrichment_data.company_data.financial_intelligence && (
+                                    <>
+                                      <DetailItem>
+                                        <DetailLabel>Funding Status:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.company_data.financial_intelligence.funding_status || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                      <DetailItem>
+                                        <DetailLabel>Key Investors:</DetailLabel>
+                                        <DetailValue>{(contact.metadata.enrichment_data.company_data.financial_intelligence.key_investors || []).join(', ') || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                      <DetailItem>
+                                        <DetailLabel>Growth Trajectory:</DetailLabel>
+                                        <DetailValue>{contact.metadata.enrichment_data.company_data.financial_intelligence.growth_trajectory || 'Unknown'}</DetailValue>
+                                      </DetailItem>
+                                    </>
+                                  )}
+                                  
+                                  {/* Market Position */}
+                                  {contact.metadata.enrichment_data.company_data.market_position && (
+                                    <DetailItem>
+                                      <DetailLabel>Competitive Landscape:</DetailLabel>
+                                      <DetailValue>{contact.metadata.enrichment_data.company_data.market_position.competitive_landscape || 'Unknown'}</DetailValue>
+                                    </DetailItem>
+                                  )}
+                                </DetailSection>
+                              )}
+                              
+                              {/* Relationship Intelligence */}
+                              {contact.metadata.enrichment_data.relationship_intelligence && (
+                                <DetailSection>
+                                  <DetailTitle>🤝 Relationship Intelligence</DetailTitle>
                                   <DetailItem>
-                                    <DetailLabel>Stage:</DetailLabel>
-                                    <DetailValue>{contact.metadata.enrichment_data.company_data.company_profile?.company_stage || 'Unknown'}</DetailValue>
+                                    <DetailLabel>Relationship Stage:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.relationship_intelligence.relationship_stage || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Engagement Level:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.relationship_intelligence.engagement_level || 'Unknown'}</DetailValue>
                                   </DetailItem>
                                 </DetailSection>
                               )}
                               
+                              {/* Actionable Insights */}
+                              {contact.metadata.enrichment_data.actionable_insights && (
+                                <DetailSection>
+                                  <DetailTitle>🎯 Strategic Engagement Insights</DetailTitle>
+                                  <DetailItem>
+                                    <DetailLabel>Best Approach:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.actionable_insights.best_approach || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Meeting Likelihood:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.actionable_insights.meeting_likelihood || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  <DetailItem>
+                                    <DetailLabel>Timing Considerations:</DetailLabel>
+                                    <DetailValue>{contact.metadata.enrichment_data.actionable_insights.timing_considerations || 'Unknown'}</DetailValue>
+                                  </DetailItem>
+                                  
+                                  {/* Conversation Starters */}
+                                  {contact.metadata.enrichment_data.actionable_insights.conversation_starters && contact.metadata.enrichment_data.actionable_insights.conversation_starters.length > 0 && (
+                                    <DetailItem>
+                                      <DetailLabel>Conversation Starters:</DetailLabel>
+                                      <DetailValue>
+                                        <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                                          {contact.metadata.enrichment_data.actionable_insights.conversation_starters.slice(0, 3).map((starter: string, idx: number) => (
+                                            <li key={idx} style={{ marginBottom: '3px' }}>{starter}</li>
+                                          ))}
+                                        </ul>
+                                      </DetailValue>
+                                    </DetailItem>
+                                  )}
+                                  
+                                  {/* Value Propositions */}
+                                  {contact.metadata.enrichment_data.actionable_insights.value_propositions && contact.metadata.enrichment_data.actionable_insights.value_propositions.length > 0 && (
+                                    <DetailItem>
+                                      <DetailLabel>Value Propositions:</DetailLabel>
+                                      <DetailValue>{contact.metadata.enrichment_data.actionable_insights.value_propositions.join(', ')}</DetailValue>
+                                    </DetailItem>
+                                  )}
+                                </DetailSection>
+                              )}
+                              
+                              {/* Intelligence Summary - Show as formatted sections instead of raw JSON */}
                               {contact.metadata.enrichment_data.intelligence_summary && (
                                 <DetailSection>
                                   <DetailTitle>🧠 Intelligence Summary</DetailTitle>
-                                  <DetailItem>
-                                    <DetailValue>{JSON.stringify(contact.metadata.enrichment_data.intelligence_summary, null, 2)}</DetailValue>
-                                  </DetailItem>
+                                  {typeof contact.metadata.enrichment_data.intelligence_summary === 'object' ? (
+                                    Object.entries(contact.metadata.enrichment_data.intelligence_summary).map(([key, value]) => (
+                                      <DetailItem key={key}>
+                                        <DetailLabel>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</DetailLabel>
+                                        <DetailValue>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</DetailValue>
+                                      </DetailItem>
+                                    ))
+                                  ) : (
+                                    <DetailItem>
+                                      <DetailValue>{String(contact.metadata.enrichment_data.intelligence_summary)}</DetailValue>
+                                    </DetailItem>
+                                  )}
                                 </DetailSection>
                               )}
                             </DetailGrid>
