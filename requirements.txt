@@ -81,6 +81,7 @@ orjson==3.10.18
 overrides==7.7.0
 packaging==25.0
 pgvector==0.3.5
+playwright==1.52.0
 posthog==5.1.0
 propcache==0.3.2
 proto-plus==1.26.1
