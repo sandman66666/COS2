@@ -1294,19 +1294,28 @@ def enrich_contacts():
         
         def background_contact_enrichment():
             try:
+                logger.info(f"🔧 Background job {job_id} started - entering main execution")
+                
                 # Update status to connecting
                 update_job_progress(job_id, 0, 'Connecting to database...')
+                logger.info(f"🔧 Background job {job_id} - updated progress to 0%")
                 
                 storage_manager = get_storage_manager_sync()
+                logger.info(f"🔧 Background job {job_id} - got storage manager")
+                
                 user = storage_manager.get_user_by_email(user_email)
                 if not user:
+                    logger.error(f"🔧 Background job {job_id} - user not found: {user_email}")
                     complete_job(job_id, False, 'User not found in database')
                     return
                 
                 user_id = user['id']
+                logger.info(f"🔧 Background job {job_id} - found user_id: {user_id}")
                 
                 # Get contacts that need enrichment - SKIP ALREADY ENRICHED
+                logger.info(f"🔧 Background job {job_id} - fetching contacts...")
                 all_contacts, total = storage_manager.get_contacts(user_id, limit=limit * 2)  # Get more to filter
+                logger.info(f"🔧 Background job {job_id} - got {len(all_contacts)} contacts")
                 
                 # Filter out contacts that already have enrichment data (resume capability)
                 contacts_to_enrich = []
@@ -1316,6 +1325,7 @@ def enrich_contacts():
                     'total_contacts_found': len(all_contacts),
                     'filtering_progress': 'checking_enrichment_status'
                 })
+                logger.info(f"🔧 Background job {job_id} - starting contact filtering")
                 
                 for contact in all_contacts:
                     # Check for stop signal during filtering
@@ -1356,8 +1366,10 @@ def enrich_contacts():
                         break
                 
                 contacts = contacts_to_enrich[:limit]
+                logger.info(f"🔧 Background job {job_id} - filtered to {len(contacts)} contacts for enrichment")
                 
                 if not contacts:
+                    logger.info(f"🔧 Background job {job_id} - no contacts need enrichment")
                     complete_job(job_id, True, 
                         f'No contacts need enrichment. {already_enriched_count} contacts already enriched.',
                         result={'already_enriched': already_enriched_count, 'newly_enriched': 0},
@@ -1370,136 +1382,176 @@ def enrich_contacts():
                     'already_enriched': already_enriched_count,
                     'enrichment_phase': 'initializing'
                 })
+                logger.info(f"🔧 Background job {job_id} - about to import enrichment modules")
                 
                 # Import the advanced contact enrichment service
                 import sys
                 import os
                 import asyncio
-                sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+                logger.info(f"🔧 Background job {job_id} - basic imports successful")
                 
-                from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+                logger.info(f"🔧 Background job {job_id} - added path to sys.path")
+                
+                try:
+                    from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
+                    logger.info(f"🔧 Background job {job_id} - ContactEnrichmentService imported successfully")
+                except Exception as import_error:
+                    logger.error(f"🔧 Background job {job_id} - FAILED to import ContactEnrichmentService: {import_error}")
+                    complete_job(job_id, False, f"Import failed: {str(import_error)}")
+                    return
 
                 async def run_advanced_enrichment():
-                    enrichment_service = ContactEnrichmentService(user_id, storage_manager)
-                    await enrichment_service.initialize()
+                    logger.info(f"🔧 Background job {job_id} - entering async enrichment function")
                     
-                    # Update progress for initialization complete
-                    update_job_progress(job_id, 15, 'Enrichment service initialized. Starting batch processing...', {
-                        'enrichment_phase': 'batch_processing_started'
-                    })
-                    
-                    # Check for stop signal before starting enrichment
-                    if should_stop_job(job_id):
-                        stop_job_gracefully(job_id,
-                            'Stopped before enrichment processing. Service initialized successfully.',
-                            resume_info={'can_resume': True, 'next_step': 'enrichment', 'contacts_remaining': len(contacts)}
-                        )
-                        return {'stopped': True}
-                    
-                    # Get user emails for context analysis
-                    user_emails, _ = storage_manager.get_emails(user_id, limit=1000)
-                    
-                    # Run enhanced batch enrichment with stop checking
-                    enrichment_result = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
-                    
-                    # Process and store results
-                    successful_enrichments = 0
-                    enriched_contacts = enrichment_result.get('enriched_contacts', [])
-                    
-                    update_job_progress(job_id, 85, f'Storing enrichment results for {len(enriched_contacts)} contacts...', {
-                        'enrichment_phase': 'storing_results',
-                        'enriched_contacts_count': len(enriched_contacts)
-                    })
-                    
-                    for i, enriched_contact in enumerate(enriched_contacts):
-                        # Check for stop signal during result storage
+                    try:
+                        enrichment_service = ContactEnrichmentService(user_id, storage_manager)
+                        logger.info(f"🔧 Background job {job_id} - ContactEnrichmentService created")
+                        
+                        await enrichment_service.initialize()
+                        logger.info(f"🔧 Background job {job_id} - ContactEnrichmentService initialized")
+                        
+                        # Update progress for initialization complete
+                        update_job_progress(job_id, 15, 'Enrichment service initialized. Starting batch processing...', {
+                            'enrichment_phase': 'batch_processing_started'
+                        })
+                        logger.info(f"🔧 Background job {job_id} - updated progress to 15%")
+                        
+                        # Check for stop signal before starting enrichment
                         if should_stop_job(job_id):
                             stop_job_gracefully(job_id,
-                                f'Stopped while storing results. Processed {i} of {len(enriched_contacts)} enrichment results.',
-                                partial_result={
-                                    'enriched_contacts': i,
-                                    'total_contacts': len(contacts),
-                                    'success_rate': (i / len(contacts)) * 100 if len(contacts) > 0 else 0
-                                },
-                                resume_info={
-                                    'can_resume': True, 
-                                    'next_step': 'storing_results',
-                                    'results_stored': i,
-                                    'results_remaining': len(enriched_contacts) - i
-                                }
+                                'Stopped before enrichment processing. Service initialized successfully.',
+                                resume_info={'can_resume': True, 'next_step': 'enrichment', 'contacts_remaining': len(contacts)}
                             )
-                            return {'stopped': True, 'partial_success': i}
+                            return {'stopped': True}
                         
-                        try:
-                            email = enriched_contact.get('email', '')
-                            if email and hasattr(enriched_contact, '__dict__'):
-                                # Store enrichment data
-                                enrichment_data = {
-                                    'enrichment_timestamp': datetime.utcnow().isoformat(),
-                                    'confidence_score': getattr(enriched_contact, 'confidence_score', 0.0),
-                                    'data_sources': getattr(enriched_contact, 'data_sources', []),
-                                    'person_data': getattr(enriched_contact, 'person_data', {}),
-                                    'company_data': getattr(enriched_contact, 'company_data', {}),
-                                    'relationship_intelligence': getattr(enriched_contact, 'relationship_intelligence', {}),
-                                    'actionable_insights': getattr(enriched_contact, 'actionable_insights', {}),
-                                }
-                                
-                                success = storage_manager.postgres.update_contact_metadata(
-                                    user_id, email, {'enrichment_data': enrichment_data}
+                        # Get user emails for context analysis
+                        logger.info(f"🔧 Background job {job_id} - fetching user emails")
+                        user_emails, _ = storage_manager.get_emails(user_id, limit=1000)
+                        logger.info(f"🔧 Background job {job_id} - got {len(user_emails)} user emails")
+                        
+                        # Run enhanced batch enrichment with stop checking
+                        logger.info(f"🔧 Background job {job_id} - starting batch enrichment")
+                        enrichment_result = await enrichment_service.enrich_contacts_batch(contacts, user_emails)
+                        logger.info(f"🔧 Background job {job_id} - batch enrichment completed")
+                        
+                        # Process and store results
+                        successful_enrichments = 0
+                        enriched_contacts = enrichment_result.get('enriched_contacts', [])
+                        
+                        update_job_progress(job_id, 85, f'Storing enrichment results for {len(enriched_contacts)} contacts...', {
+                            'enrichment_phase': 'storing_results',
+                            'enriched_contacts_count': len(enriched_contacts)
+                        })
+                        logger.info(f"🔧 Background job {job_id} - processing {len(enriched_contacts)} enriched contacts")
+                        
+                        for i, enriched_contact in enumerate(enriched_contacts):
+                            # Check for stop signal during result storage
+                            if should_stop_job(job_id):
+                                stop_job_gracefully(job_id,
+                                    f'Stopped while storing results. Processed {i} of {len(enriched_contacts)} enrichment results.',
+                                    partial_result={
+                                        'enriched_contacts': i,
+                                        'total_contacts': len(contacts),
+                                        'success_rate': (i / len(contacts)) * 100 if len(contacts) > 0 else 0
+                                    },
+                                    resume_info={
+                                        'can_resume': True, 
+                                        'next_step': 'storing_results',
+                                        'results_stored': i,
+                                        'results_remaining': len(enriched_contacts) - i
+                                    }
                                 )
-                                
-                                if success:
-                                    successful_enrichments += 1
+                                return {'stopped': True, 'partial_success': i}
+                            
+                            try:
+                                email = enriched_contact.get('email', '')
+                                if email and hasattr(enriched_contact, '__dict__'):
+                                    # Store enrichment data
+                                    enrichment_data = {
+                                        'enrichment_timestamp': datetime.utcnow().isoformat(),
+                                        'confidence_score': getattr(enriched_contact, 'confidence_score', 0.0),
+                                        'data_sources': getattr(enriched_contact, 'data_sources', []),
+                                        'person_data': getattr(enriched_contact, 'person_data', {}),
+                                        'company_data': getattr(enriched_contact, 'company_data', {}),
+                                        'relationship_intelligence': getattr(enriched_contact, 'relationship_intelligence', {}),
+                                        'actionable_insights': getattr(enriched_contact, 'actionable_insights', {}),
+                                    }
                                     
-                                    # Update progress every few contacts
-                                    if i % 5 == 0:
-                                        progress = 85 + int((i / len(enriched_contacts)) * 10)  # 85-95% for storage
-                                        update_job_progress(job_id, progress, 
-                                            f'Stored enrichment {i+1}/{len(enriched_contacts)}: {email}', {
-                                            'enrichment_phase': 'storing_results',
-                                            'stored_count': successful_enrichments,
-                                            'current_contact': email
-                                        })
-                                
-                        except Exception as e:
-                            logger.error(f"Failed to store enrichment for contact: {e}")
-                    
-                    return {
-                        'contacts_processed': len(contacts),
-                        'successfully_enriched': successful_enrichments,
-                        'failed_count': len(contacts) - successful_enrichments,
-                        'success_rate': (successful_enrichments / len(contacts)) * 100 if len(contacts) > 0 else 0,
-                        'sources_used': len(set().union(*[getattr(c, 'data_sources', []) for c in enriched_contacts])),
-                        'mode': 'advanced_background_with_stopping'
-                    }
+                                    success = storage_manager.postgres.update_contact_metadata(
+                                        user_id, email, {'enrichment_data': enrichment_data}
+                                    )
+                                    
+                                    if success:
+                                        successful_enrichments += 1
+                                        
+                                        # Update progress every few contacts
+                                        if i % 5 == 0:
+                                            progress = 85 + int((i / len(enriched_contacts)) * 10)  # 85-95% for storage
+                                            update_job_progress(job_id, progress, 
+                                                f'Stored enrichment {i+1}/{len(enriched_contacts)}: {email}', {
+                                                'enrichment_phase': 'storing_results',
+                                                'stored_count': successful_enrichments,
+                                                'current_contact': email
+                                            })
+                                    
+                            except Exception as e:
+                                logger.error(f"Failed to store enrichment for contact: {e}")
+                        
+                        logger.info(f"🔧 Background job {job_id} - successfully stored {successful_enrichments} enrichments")
+                        
+                        return {
+                            'contacts_processed': len(contacts),
+                            'successfully_enriched': successful_enrichments,
+                            'failed_count': len(contacts) - successful_enrichments,
+                            'success_rate': (successful_enrichments / len(contacts)) * 100 if len(contacts) > 0 else 0,
+                            'sources_used': len(set().union(*[getattr(c, 'data_sources', []) for c in enriched_contacts])),
+                            'mode': 'advanced_background_with_stopping'
+                        }
+                        
+                    except Exception as async_error:
+                        logger.error(f"🔧 Background job {job_id} - ERROR in async enrichment: {async_error}")
+                        raise async_error
                 
                 # Run the async advanced enrichment in a synchronous context
                 try:
+                    logger.info(f"🔧 Background job {job_id} - setting up event loop")
                     # Create new event loop for this thread
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
+                    logger.info(f"🔧 Background job {job_id} - event loop created, running async function")
+                    
                     stats = loop.run_until_complete(run_advanced_enrichment())
+                    logger.info(f"🔧 Background job {job_id} - async function completed successfully")
+                    
                     loop.close()
+                    logger.info(f"🔧 Background job {job_id} - event loop closed")
                     
                     # Check if stopped
                     if stats.get('stopped'):
+                        logger.info(f"🔧 Background job {job_id} - job was stopped gracefully")
                         return  # Job already handled by stop_job_gracefully
                         
                 except Exception as e:
-                    logger.error(f"Advanced contact enrichment failed: {e}")
+                    logger.error(f"🔧 Background job {job_id} - CRITICAL ERROR in async execution: {e}")
+                    logger.error(f"🔧 Background job {job_id} - Error type: {type(e).__name__}")
+                    logger.error(f"🔧 Background job {job_id} - Error args: {e.args}")
                     complete_job(job_id, False, f"Advanced enrichment failed: {str(e)}")
                     return
                 
                 # Final completion
+                logger.info(f"🔧 Background job {job_id} - completing job successfully")
                 complete_job(job_id, True,
                     f'Contact enrichment complete! Enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts',
                     result=stats,
                     resume_info={'can_resume': False, 'reason': 'completed_successfully'})
                 
-                logger.info(f"Advanced contact enrichment completed for user {user_email}", stats=stats)
+                logger.info(f"🔧 Background job {job_id} - Advanced contact enrichment completed for user {user_email}", extra={'stats': stats})
                 
             except Exception as e:
-                logger.error(f"Background contact enrichment job {job_id} failed: {str(e)}")
+                logger.error(f"🔧 Background job {job_id} - FATAL ERROR in background thread: {e}")
+                logger.error(f"🔧 Background job {job_id} - Fatal error type: {type(e).__name__}")
+                logger.error(f"🔧 Background job {job_id} - Fatal error args: {e.args}")
                 complete_job(job_id, False, f'Contact enrichment failed: {str(e)}')
 
         # Start background thread
