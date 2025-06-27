@@ -15,7 +15,7 @@ uvicorn==0.34.3
 PyJWT==2.8.0
 redis==5.2.0
 numpy==1.26.4
-chromadb==0.4.24
+chromadb==0.4.20
 neo4j==5.28.1
 playwright==1.52.0
 pyee==13.0.0

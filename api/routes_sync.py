@@ -7,7 +7,7 @@ Flask-compatible routes without async/event loop conflicts
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from flask import Blueprint, request, jsonify, current_app, session, render_template
 from google.auth.transport.requests import Request
