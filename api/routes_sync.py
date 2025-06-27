@@ -2,6 +2,7 @@
 Synchronous API Routes for Strategic Intelligence System
 =======================================================
 Flask-compatible routes without async/event loop conflicts
+DEPLOYMENT v70 - FIXED: Added Any import and NumPy compatibility
 """
 
 import json
