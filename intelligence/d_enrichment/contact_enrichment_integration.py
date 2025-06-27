@@ -23,12 +23,16 @@ class ContactEnrichmentService:
     def __init__(self, user_id: int):
         self.user_id = user_id
         self.enricher = EnhancedContactEnricher(user_id)
+        self.storage_manager = None  # Will be initialized when needed
         self._initialized = False
     
     async def initialize(self) -> bool:
         """Initialize the enrichment service"""
         try:
             await self.enricher.initialize()
+            # Initialize storage manager
+            from storage.storage_manager_sync import get_storage_manager_sync
+            self.storage_manager = get_storage_manager_sync()
             self._initialized = True
             logger.info(f"Contact enrichment service initialized for user {self.user_id}")
             return True
@@ -96,9 +100,8 @@ class ContactEnrichmentService:
         # Get user emails for context analysis
         user_emails = []
         try:
-            if hasattr(self.storage_manager, 'get_emails'):
-                emails_data, _ = self.storage_manager.get_emails(self.user_id, limit=500)
-                user_emails = emails_data
+            if hasattr(self.storage_manager, 'get_emails_for_user'):
+                user_emails = self.storage_manager.get_emails_for_user(self.user_id, limit=500)
                 logger.info(f"📧 Retrieved {len(user_emails)} user emails for context analysis")
         except Exception as e:
             logger.warning(f"Could not retrieve user emails: {e}")
