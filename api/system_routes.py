@@ -7,7 +7,7 @@ System utilities and testing endpoints
 import asyncio
 import random
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from middleware.auth_middleware import require_auth
 from utils.logging import structured_logger as logger
 import os
@@ -37,15 +37,13 @@ def sanity_fast_test():
     """
     async def _run_sanity_test():
         try:
-            user_id = request.user_id
-            user_email = request.user_email
+            user_email = session.get('user_id', 'test@session-42.com')  # Session stores email in 'user_id'
             
             logger.info(f"🧪 Starting Sanity Fast Test for user {user_email}")
             
             start_time = datetime.utcnow()
             test_results = {
                 'success': True,
-                'user_id': user_id,
                 'user_email': user_email,
                 'start_time': start_time.isoformat(),
                 'steps_completed': [],
@@ -70,6 +68,7 @@ def sanity_fast_test():
                 }, 400
                 
             user_id = user['id']
+            test_results['user_id'] = user_id
             
             # Get 2 contacts with highest frequency for better test data
             contacts, total = storage_manager.get_contacts(user_id, limit=2)
@@ -306,7 +305,7 @@ def flush_database():
     Flush all user data from database
     """
     try:
-        user_email = request.user_email
+        user_email = session.get('user_id', 'test@session-42.com')  # Session stores email in 'user_id'
         
         storage_manager = get_storage_manager_sync()
         user = storage_manager.get_user_by_email(user_email)
