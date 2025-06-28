@@ -365,6 +365,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
     extract: { days: 365 }
   });
   const [showFlushConfirm, setShowFlushConfirm] = useState(false);
+  const [sanityTestRunning, setSanityTestRunning] = useState(false);
+  const [sanityTestResults, setSanityTestResults] = useState<any>(null);
 
   useEffect(() => {
     checkAuthentication();
@@ -625,6 +627,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
     status === 'running' || status === 'stopping'
   );
 
+  const runSanityFastTest = async () => {
+    if (!isAuthenticated) {
+      alert('Please authenticate first');
+      return;
+    }
+
+    setSanityTestRunning(true);
+    setSanityTestResults(null);
+    
+    try {
+      console.log('🧪 Starting Sanity Fast Test...');
+      
+      const response = await axios.post('/api/system/sanity-fast-test');
+      
+      if (response.data.success) {
+        setSanityTestResults(response.data);
+        alert(`🎉 Sanity Test Completed!\n\n✅ ${response.data.summary}\n\nCheck console for detailed results.`);
+        console.log('🧪 Sanity Test Results:', response.data);
+      } else {
+        alert(`❌ Sanity Test Failed: ${response.data.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Sanity Test failed:', error);
+      alert('Sanity Test failed. Check console for details.');
+    } finally {
+      setSanityTestRunning(false);
+    }
+  };
+
   return (
     <DashboardContainer>
       <Header>
@@ -689,6 +720,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onAuthChange }) => {
           disabled={pipelineState.isRunning || hasRunningJobs}
         >
           Reset Pipeline
+        </ActionButton>
+
+        <ActionButton
+          variant="secondary"
+          onClick={runSanityFastTest}
+          disabled={!isAuthenticated || sanityTestRunning || pipelineState.isRunning || hasRunningJobs}
+          title="Quick end-to-end test with 2 contacts to verify all components work"
+        >
+          {sanityTestRunning ? '🧪 Testing...' : '🧪 Sanity Fast Test'}
         </ActionButton>
       </ControlsContainer>
 

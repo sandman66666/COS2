@@ -25,6 +25,7 @@ from api.routes_sync import api_sync_bp
 from api.logging_routes_sync import logging_bp
 from api.intelligence_routes_with_logging import intelligence_logging_bp
 from api.shared_intelligence_routes import shared_intelligence_bp
+from api.system_routes import system_bp
 # from api.alerts_routes_flask import alerts_bp  # Temporarily disabled - uses async routes
 # from routes.contacts import contacts_bp  # Removed - module doesn't exist
 from middleware.auth_middleware import get_current_user, require_auth
@@ -62,6 +63,7 @@ def create_app():
     app.register_blueprint(logging_bp)  # Add logging analysis routes
     app.register_blueprint(intelligence_logging_bp)  # Add intelligence logging routes
     app.register_blueprint(shared_intelligence_bp)
+    app.register_blueprint(system_bp, url_prefix='/api/system')  # Add system routes
     
     # Domain redirect middleware for OAuth consistency
     @app.before_request
