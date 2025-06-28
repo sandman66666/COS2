@@ -785,4 +785,96 @@ class EnterpriseBlackBeltAdapter:
         if self.scraping_engine:
             await self.scraping_engine.cleanup()
         
-        logger.info(f"🏢🥷 Enterprise Black Belt Adapter cleaned up for user {self.user_id}") 
+        logger.info(f"🏢🥷 Enterprise Black Belt Adapter cleaned up for user {self.user_id}")
+
+    async def _linkedin_search_by_domain(self, email: str, name_candidates: List[str], domain: str) -> Optional[Dict]:
+        """Search LinkedIn using domain-based strategies"""
+        if not domain:
+            return None
+        
+        search_queries = [
+            f'site:linkedin.com/in/ "{domain}"',
+            f'site:linkedin.com/in/ @{domain}',
+        ]
+        
+        for query in search_queries:
+            result = await self._execute_enterprise_search(query, 'linkedin_domain')
+            if result and result.get('profile_url'):
+                return result
+        
+        return None
+    
+    async def _linkedin_reverse_search(self, email: str, name_candidates: List[str], domain: str) -> Optional[Dict]:
+        """Advanced LinkedIn reverse search using multiple techniques"""
+        if not name_candidates:
+            return None
+        
+        # Try reverse engineering common LinkedIn URL patterns
+        for name in name_candidates:
+            potential_usernames = [
+                name.lower().replace(' ', ''),
+                name.lower().replace(' ', '-'),
+                f"{name.split()[0].lower()}-{name.split()[-1].lower()}" if len(name.split()) >= 2 else None,
+                f"{name.split()[0].lower()}{name.split()[-1].lower()}" if len(name.split()) >= 2 else None,
+            ]
+            
+            for username in potential_usernames:
+                if not username or len(username) < 3:
+                    continue
+                
+                # Try direct LinkedIn URL construction
+                linkedin_url = f"https://www.linkedin.com/in/{username}"
+                
+                try:
+                    result = await self.scraping_engine.advanced_scrape(linkedin_url)
+                    if result.success and not result.blocked:
+                        # Validate it's a real profile
+                        if self._validate_linkedin_profile_direct(result.data):
+                            return {
+                                'profile_url': linkedin_url,
+                                'discovery_method': 'reverse_username_construction',
+                                'confidence': 0.6,
+                                'profile_data': result.data
+                            }
+                    
+                    # Small delay between attempts
+                    await asyncio.sleep(random.uniform(1, 2))
+                    
+                except Exception as e:
+                    logger.debug(f"LinkedIn reverse search failed for {username}: {e}")
+                    continue
+        
+        return None
+    
+    def _validate_linkedin_profile_direct(self, profile_data: Dict) -> bool:
+        """Validate if direct LinkedIn profile access returned valid data"""
+        # Check for LinkedIn-specific indicators
+        indicators = [
+            profile_data.get('name'),
+            profile_data.get('title'), 
+            profile_data.get('page_title', '').lower().find('linkedin') != -1,
+            profile_data.get('meta_tags_count', 0) > 15,
+            'linkedin' in str(profile_data).lower()
+        ]
+        
+        return sum(bool(indicator) for indicator in indicators) >= 2
+    
+    async def _enrich_linkedin_profile_enterprise(self, profile_url: str) -> Optional[Dict]:
+        """Enrich LinkedIn profile using enterprise scraping"""
+        try:
+            result = await self.scraping_engine.advanced_scrape(profile_url)
+            
+            if result.success and not result.blocked and not result.captcha_detected:
+                return {
+                    'profile_data': result.data,
+                    'enrichment_method': 'enterprise_scraping',
+                    'success': True,
+                    'confidence': 0.8
+                }
+            else:
+                logger.debug(f"LinkedIn profile enrichment failed: blocked={result.blocked}, captcha={result.captcha_detected}")
+                
+        except Exception as e:
+            logger.debug(f"LinkedIn profile enrichment error: {e}")
+        
+        return None 
