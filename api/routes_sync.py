@@ -1465,7 +1465,7 @@ def enrich_contacts():
                                 return {'stopped': True, 'partial_success': i}
                             
                             try:
-                                email = enriched_contact.get('email', '')
+                                email = getattr(enriched_contact, 'email', '')
                                 if email and hasattr(enriched_contact, '__dict__'):
                                     # Store enrichment data
                                     enrichment_data = {
