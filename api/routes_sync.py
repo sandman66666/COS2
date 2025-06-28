@@ -1405,8 +1405,9 @@ def enrich_contacts():
                     logger.info(f"🔧 Background job {job_id} - entering async enrichment function")
                     
                     try:
-                        enrichment_service = ContactEnrichmentService(user_id, storage_manager)
-                        logger.info(f"🔧 Background job {job_id} - ContactEnrichmentService created")
+                        # NEW: Pass ANTHROPIC_API_KEY for Black Belt Intelligence
+                        enrichment_service = ContactEnrichmentService(user_id, storage_manager, ANTHROPIC_API_KEY)
+                        logger.info(f"🔧 Background job {job_id} - ContactEnrichmentService created with Black Belt Intelligence")
                         
                         await enrichment_service.initialize()
                         logger.info(f"🔧 Background job {job_id} - ContactEnrichmentService initialized")
@@ -1532,6 +1533,15 @@ def enrich_contacts():
                         logger.info(f"🔧 Background job {job_id} - job was stopped gracefully")
                         return  # Job already handled by stop_job_gracefully
                         
+                    # NEW: Check for system failure
+                    if stats.get('system_failure'):
+                        logger.error(f"🔧 Background job {job_id} - system failure detected: {stats.get('failure_reason')}")
+                        complete_job(job_id, False, 
+                            f"System failure detected: {stats['failure_reason']}. {stats.get('error', '')}",
+                            result=stats,
+                            resume_info={'can_resume': False, 'reason': 'system_failure', 'diagnosis': stats.get('failure_reason')})
+                        return
+                        
                 except Exception as e:
                     logger.error(f"🔧 Background job {job_id} - CRITICAL ERROR in async execution: {e}")
                     logger.error(f"🔧 Background job {job_id} - Error type: {type(e).__name__}")
@@ -1541,12 +1551,21 @@ def enrich_contacts():
                 
                 # Final completion
                 logger.info(f"🔧 Background job {job_id} - completing job successfully")
-                complete_job(job_id, True,
-                    f'Contact enrichment complete! Enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts',
-                    result=stats,
+                
+                # NEW: Include system health in completion message
+                system_health = stats.get('system_health', {})
+                validation_stats = stats.get('validation_stats', {})
+                
+                completion_message = f'Contact enrichment complete! Enriched {stats["successfully_enriched"]} of {stats["contacts_processed"]} contacts'
+                
+                if not system_health.get('is_healthy', True):
+                    completion_message += f' (Warning: {system_health.get("diagnosis", "System issues detected")})'
+                
+                complete_job(job_id, True, completion_message, result=stats,
                     resume_info={'can_resume': False, 'reason': 'completed_successfully'})
                 
-                logger.info(f"🔧 Background job {job_id} - Advanced contact enrichment completed for user {user_email}", extra={'stats': stats})
+                logger.info(f"🔧 Background job {job_id} - Advanced contact enrichment completed for user {user_email}", 
+                           extra={'stats': stats, 'system_health': system_health})
                 
             except Exception as e:
                 logger.error(f"🔧 Background job {job_id} - FATAL ERROR in background thread: {e}")

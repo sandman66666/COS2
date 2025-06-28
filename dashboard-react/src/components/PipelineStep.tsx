@@ -284,6 +284,45 @@ const PipelineStep: React.FC<PipelineStepProps> = ({
              status === 'stopped' ? 'Stopped' :
              status === 'error' ? 'Error occurred' : '';
     }
+
+    // Custom progress displays for specific stages
+    if (step.id === 'extract') {
+      // Stage 1: Show number of contacts ingested
+      const contactsCompleted = jobStatus.contacts_completed || 0;
+      const contactsTotal = jobStatus.contacts_total;
+      
+      if (contactsTotal) {
+        return `Contacts ingested: ${contactsCompleted}/${contactsTotal}`;
+      } else if (contactsCompleted > 0) {
+        return `Contacts ingested: ${contactsCompleted}`;
+      }
+      return isRunning ? 'Analyzing emails for contacts...' : jobStatus.message;
+    }
+    
+    if (step.id === 'emails') {
+      // Stage 2: Show number of emails ingested  
+      const emailsFound = jobStatus.emails_found || 0;
+      
+      if (emailsFound > 0) {
+        return `Emails ingested: ${emailsFound}`;
+      }
+      return isRunning ? 'Syncing emails from Gmail...' : jobStatus.message;
+    }
+    
+    if (step.id === 'augment') {
+      // Stage 3: Show contact name being processed
+      if (jobStatus.current_contact) {
+        return `Processing: ${jobStatus.current_contact}`;
+      }
+      
+      const enrichedCount = jobStatus.enriched_contacts_count || 0;
+      if (enrichedCount > 0) {
+        return `Contacts enriched: ${enrichedCount}`;
+      }
+      return isRunning ? 'Enriching contacts...' : jobStatus.message;
+    }
+    
+    // Default behavior for other stages
     return jobStatus.message;
   };
 
@@ -406,7 +445,16 @@ const PipelineStep: React.FC<PipelineStepProps> = ({
       <ProgressContainer visible={isRunning || isStopping || status === 'completed' || isStopped}>
         <ProgressInfo>
           <ProgressText>{getProgressMessage()}</ProgressText>
-          <ProgressText>{Math.round(progress)}%</ProgressText>
+          <ProgressText>
+            {/* Custom progress display based on stage */}
+            {step.id === 'extract' && jobStatus?.contacts_completed ? 
+              `${jobStatus.contacts_completed} contacts` :
+            step.id === 'emails' && jobStatus?.emails_found ?
+              `${jobStatus.emails_found} emails` :
+            step.id === 'augment' && jobStatus?.current_contact ?
+              'Processing...' :
+            `${Math.round(progress)}%`}
+          </ProgressText>
         </ProgressInfo>
         
         <ProgressBar>

@@ -55,6 +55,9 @@ class AdvancedWebIntelligence:
         self.cache = {}
         self.browser_available = False
         
+        # NEW: Callback for recording web request results (for validation)
+        self.validation_callback = None
+        
     async def initialize(self):
         """Initialize all components"""
         # Initialize enhanced HTTP session
@@ -205,10 +208,20 @@ class AdvancedWebIntelligence:
                         data = self._extract_enhanced_info_from_html(html, domain)
                         if data:
                             logger.info(f"✅ Enhanced website analysis successful for {url}")
+                            # NEW: Record successful web request
+                            if self.validation_callback:
+                                self.validation_callback(True)
                             return data
+                    else:
+                        # NEW: Record failed web request
+                        if self.validation_callback:
+                            self.validation_callback(False, f"HTTP {response.status}")
                     
             except Exception as e:
                 logger.debug(f"Enhanced website analysis failed for {url}: {e}")
+                # NEW: Record failed web request
+                if self.validation_callback:
+                    self.validation_callback(False, str(e))
                 continue
         
         return None
@@ -361,10 +374,21 @@ class AdvancedWebIntelligence:
             async with self.session.get(url, headers=headers, ssl=False) as response:
                 if response.status == 200:
                     html = await response.text()
-                    return self._parse_search_results(html, engine)
+                    result = self._parse_search_results(html, engine)
+                    # NEW: Record successful search request
+                    if self.validation_callback:
+                        self.validation_callback(True)
+                    return result
+                else:
+                    # NEW: Record failed search request
+                    if self.validation_callback:
+                        self.validation_callback(False, f"HTTP {response.status}")
                     
         except Exception as e:
             logger.debug(f"{engine} search error: {e}")
+            # NEW: Record failed search request
+            if self.validation_callback:
+                self.validation_callback(False, str(e))
         
         return None
     
@@ -892,4 +916,8 @@ class AdvancedWebIntelligence:
         if self.browser_available and self.browser:
             await self.browser.close()
         
-        logger.info("🧹 Advanced Web Intelligence cleaned up") 
+        logger.info("🧹 Advanced Web Intelligence cleaned up")
+
+    def set_validation_callback(self, callback):
+        """Set callback function to record web request results for validation"""
+        self.validation_callback = callback 
