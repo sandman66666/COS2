@@ -8,7 +8,6 @@ import asyncio
 import random
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from utils.db import get_db_connection
 from utils.auth import require_auth
 from utils.logging import structured_logger as logger
 import os
@@ -17,6 +16,7 @@ import os
 from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
 from intelligence.f_knowledge_integration.knowledge_tree_orchestrator import KnowledgeTreeOrchestrator
 from intelligence.e_strategic_analysis.strategic_analyzer import StrategicAnalyzer
+from storage.storage_manager_sync import get_storage_manager_sync
 
 system_bp = Blueprint('system', __name__)
 
@@ -58,29 +58,34 @@ def sanity_fast_test():
             logger.info("🧪 Step 1: Getting sample contacts from database")
             step1_start = datetime.utcnow()
             
-            with get_db_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Get 2 contacts with highest frequency for better test data
-                    cursor.execute("""
-                        SELECT id, email, domain, frequency, name, trust_tier, metadata
-                        FROM contacts 
-                        WHERE user_id = %s 
-                        ORDER BY frequency DESC 
-                        LIMIT 2
-                    """, [user_id])
-                    
-                    sample_contacts = []
-                    for row in cursor.fetchall():
-                        contact = {
-                            'id': row[0],
-                            'email': row[1],
-                            'domain': row[2],
-                            'frequency': row[3],
-                            'name': row[4] or '',
-                            'trust_tier': row[5],
-                            'metadata': row[6] or {}
-                        }
-                        sample_contacts.append(contact)
+            storage_manager = get_storage_manager_sync()
+            
+            # Get user by email
+            user = storage_manager.get_user_by_email(user_email)
+            if not user:
+                return {
+                    'success': False,
+                    'error': f'User not found: {user_email}',
+                    'suggestion': 'Please authenticate and run other pipeline steps first.'
+                }, 400
+                
+            user_id = user['id']
+            
+            # Get 2 contacts with highest frequency for better test data
+            contacts, total = storage_manager.get_contacts(user_id, limit=2)
+            
+            sample_contacts = []
+            for contact in contacts[:2]:  # Ensure we only get 2
+                contact_data = {
+                    'id': contact['id'],
+                    'email': contact['email'],
+                    'domain': contact.get('domain', ''),
+                    'frequency': contact.get('frequency', 0),
+                    'name': contact.get('name', ''),
+                    'trust_tier': contact.get('trust_tier', 'tier_3'),
+                    'metadata': contact.get('metadata', {})
+                }
+                sample_contacts.append(contact_data)
             
             if len(sample_contacts) < 2:
                 return {
@@ -100,32 +105,48 @@ def sanity_fast_test():
             logger.info("🧪 Step 2: Getting sample emails related to contacts")
             step2_start = datetime.utcnow()
             
+            # Get emails from storage manager
+            emails, email_total = storage_manager.postgres.get_emails(user_id, limit=10)
+            
             sample_emails = []
             contact_emails = [contact['email'] for contact in sample_contacts]
             
-            with get_db_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Get emails from/to these contacts
+            # Filter emails related to our test contacts
+            for email in emails:
+                try:
+                    metadata = email.get('metadata', {})
+                    if isinstance(metadata, str):
+                        import json
+                        metadata = json.loads(metadata)
+                    
+                    sender = metadata.get('from', '')
+                    recipients = metadata.get('to', [])
+                    
+                    # Check if email is from/to any of our test contacts
+                    is_related = False
                     for contact_email in contact_emails:
-                        cursor.execute("""
-                            SELECT id, subject, sender_email, recipient_emails, metadata, date_received
-                            FROM emails 
-                            WHERE user_id = %s 
-                            AND (sender_email = %s OR recipient_emails LIKE %s)
-                            ORDER BY date_received DESC
-                            LIMIT 2
-                        """, [user_id, contact_email, f'%{contact_email}%'])
+                        if (contact_email in sender or 
+                            any(contact_email in str(recipient) for recipient in recipients)):
+                            is_related = True
+                            break
+                    
+                    if is_related or len(sample_emails) < 2:  # Include at least 2 emails
+                        email_data = {
+                            'id': email['id'],
+                            'subject': metadata.get('subject', 'No Subject'),
+                            'sender_email': metadata.get('from', ''),
+                            'recipient_emails': ', '.join(recipients) if recipients else '',
+                            'metadata': metadata,
+                            'date_received': email.get('created_at', '').isoformat() if email.get('created_at') else None
+                        }
+                        sample_emails.append(email_data)
                         
-                        for row in cursor.fetchall():
-                            email = {
-                                'id': row[0],
-                                'subject': row[1],
-                                'sender_email': row[2],
-                                'recipient_emails': row[3],
-                                'metadata': row[4] or {},
-                                'date_received': row[5].isoformat() if row[5] else None
-                            }
-                            sample_emails.append(email)
+                        if len(sample_emails) >= 4:  # Limit to 4 emails for fast test
+                            break
+                            
+                except Exception as e:
+                    logger.warning(f"Error processing email {email.get('id')}: {e}")
+                    continue
             
             step2_duration = (datetime.utcnow() - step2_start).total_seconds()
             test_results['steps_completed'].append('get_emails')
@@ -285,23 +306,42 @@ def flush_database():
     Flush all user data from database
     """
     try:
-        user_id = request.user_id
+        user_email = request.user_email
         
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                # Delete user data in correct order to avoid foreign key constraints
-                tables = ['contacts', 'emails', 'knowledge_nodes', 'strategic_insights']
-                
-                for table in tables:
-                    cursor.execute(f"DELETE FROM {table} WHERE user_id = %s", [user_id])
-                
-                conn.commit()
+        storage_manager = get_storage_manager_sync()
+        user = storage_manager.get_user_by_email(user_email)
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'User not found'
+            }), 404
+            
+        user_id = user['id']
         
-        logger.info(f"🗑️ Database flushed for user {request.user_email}")
+        conn = storage_manager.postgres.conn_pool.getconn()
+        try:
+            cursor = conn.cursor()
+            
+            # Delete user data in correct order to avoid foreign key constraints
+            tables = ['contacts', 'emails', 'knowledge_tree', 'oauth_credentials']
+            
+            deleted_counts = {}
+            for table in tables:
+                cursor.execute(f"DELETE FROM {table} WHERE user_id = %s", [user_id])
+                deleted_counts[table] = cursor.rowcount
+            
+            conn.commit()
+            
+        finally:
+            storage_manager.postgres.conn_pool.putconn(conn)
+        
+        logger.info(f"🗑️ Database flushed for user {user_email}")
         
         return jsonify({
             'success': True,
-            'message': 'Database flushed successfully'
+            'message': 'Database flushed successfully',
+            'deleted_counts': deleted_counts,
+            'user_id': user_id
         })
         
     except Exception as e:
