@@ -8,7 +8,7 @@ import asyncio
 import random
 from datetime import datetime
 from flask import Blueprint, request, jsonify
-from utils.auth import require_auth
+from middleware.auth_middleware import require_auth
 from utils.logging import structured_logger as logger
 import os
 
