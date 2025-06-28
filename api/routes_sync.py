@@ -1000,14 +1000,18 @@ def analyze_sent_emails():
     try:
         logger.info("Starting analyze_sent_emails as background job")
         
-        # Get user email from session
-        user_email = session.get('user_email')
+        # FIX: Get user email from session - try both keys
+        user_email = session.get('user_email') or session.get('user_id')
         if not user_email:
+            logger.error("No user found in session - keys available: %s", list(session.keys()))
             return jsonify({'error': 'User not authenticated'}), 401
+        
+        logger.info(f"Using user_email: {user_email}")
             
         # Get OAuth credentials from session
         oauth_credentials = session.get('oauth_credentials')
         if not oauth_credentials:
+            logger.error("No OAuth credentials in session")
             return jsonify({
                 'error': 'No Gmail credentials found. Please log out and log back in to re-authenticate with Gmail.',
                 'action_required': 'reauth'
@@ -1107,12 +1111,13 @@ def analyze_sent_emails():
                         background_jobs[job_id]['status'] = 'fetching'
                         background_jobs[job_id]['message'] = 'Fetching sent emails...'
                 
-                # Fetch sent emails
+                # Fetch sent emails with LIMIT to prevent timeout
                 cutoff_date = datetime.now(timezone.utc) - timedelta(days=lookback_days)
                 query = f'in:sent after:{cutoff_date.strftime("%Y/%m/%d")}'
                 
                 try:
-                    results = service.users().messages().list(userId='me', q=query).execute()  # Remove maxResults limit to use full date range
+                    # ADD LIMIT to prevent timeout
+                    results = service.users().messages().list(userId='me', q=query, maxResults=100).execute()
                     messages = results.get('messages', [])
                     
                     with jobs_lock:
