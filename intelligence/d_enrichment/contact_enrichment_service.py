@@ -4,6 +4,7 @@ BLACK BELT Contact Enrichment Service with Shared Intelligence
 Advanced BLACK BELT-only contact enrichment with shared intelligence system
 Implements hybrid model: shared web intelligence + private email context
 90% faster enrichment, 95% cost reduction through intelligent caching
+NOW WITH ENTERPRISE-GRADE SCRAPING ENGINE
 """
 
 import asyncio
@@ -21,7 +22,8 @@ from collections import defaultdict
 import logging
 
 from intelligence.d_enrichment.advanced_web_intelligence import AdvancedWebIntelligence, CompanyIntelligence
-from intelligence.d_enrichment.black_belt_adapter import BlackBeltEnrichmentAdapter
+# UPGRADED: Enterprise Black Belt Adapter with sophisticated scraping
+from intelligence.d_enrichment.enterprise_black_belt_adapter import EnterpriseBlackBeltAdapter
 from storage.global_contact_intelligence import GlobalContactIntelligenceManager, GlobalContactRecord, UserContactContext
 from utils.logging import structured_logger as logger
 
@@ -277,7 +279,7 @@ class ContactEnrichmentService:
         
         # BLACK BELT Intelligence Adapter - This is now the PRIMARY enrichment system
         self.claude_api_key = claude_api_key
-        self.black_belt_adapter = BlackBeltEnrichmentAdapter(user_id, claude_api_key)
+        self.black_belt_adapter = EnterpriseBlackBeltAdapter(user_id, claude_api_key)
         self.black_belt_enabled = bool(claude_api_key)  # Enable if Claude API key is available
         
         # Shared intelligence metrics
