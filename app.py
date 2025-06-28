@@ -24,7 +24,6 @@ from api.auth_routes import auth_bp
 from api.routes_sync import api_sync_bp
 from api.logging_routes_sync import logging_bp
 from api.intelligence_routes_with_logging import intelligence_logging_bp
-from api.routes import api_bp
 from api.shared_intelligence_routes import shared_intelligence_bp
 # from api.alerts_routes_flask import alerts_bp  # Temporarily disabled - uses async routes
 # from routes.contacts import contacts_bp  # Removed - module doesn't exist
@@ -59,7 +58,6 @@ def create_app():
     
     # Register blueprints
     app.register_blueprint(auth_bp)
-    app.register_blueprint(api_bp)
     app.register_blueprint(api_sync_bp)  # Use sync API routes
     app.register_blueprint(logging_bp)  # Add logging analysis routes
     app.register_blueprint(intelligence_logging_bp)  # Add intelligence logging routes
