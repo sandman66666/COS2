@@ -15,7 +15,7 @@ import os
 # Import the services we'll test
 from intelligence.d_enrichment.contact_enrichment_service import ContactEnrichmentService
 from intelligence.f_knowledge_integration.knowledge_tree_orchestrator import KnowledgeTreeOrchestrator
-from intelligence.e_strategic_analysis.strategic_analyzer import StrategicAnalyzer
+from intelligence.e_strategic_analysis.strategic_analyzer import StrategicAnalysisSystem
 from storage.storage_manager_sync import get_storage_manager_sync
 
 system_bp = Blueprint('system', __name__)
@@ -232,7 +232,7 @@ def sanity_fast_test():
             
             try:
                 # Initialize strategic analyzer
-                strategic_analyzer = StrategicAnalyzer(user_id)
+                strategic_analyzer = StrategicAnalysisSystem(user_id)
                 
                 # Run strategic analysis on our test data
                 analysis_result = await strategic_analyzer.generate_comprehensive_analysis(
