@@ -221,7 +221,7 @@ class KnowledgeTreeOrchestrator:
                 'phase2_components': ['business_development_agent', 'competitive_intelligence_agent', 
                                     'network_analysis_agent', 'opportunity_matrix_agent', 'strategic_synthesizer'],
                 'phase3_components': ['opportunity_extraction', 'strategic_scoring', 'priority_ranking'],
-                'model_used': 'claude-3-5-sonnet-20241022',
+                'model_used': 'claude-3-opus-20240229',
                 'processing_method': 'claude_consolidation_plus_strategic_analysis_plus_opportunity_scoring',
                 'content_types_supported': ['email', 'document', 'slack', 'task', 'meeting', 'note'],
                 'chunking_strategy': 'intelligent_batching_or_all_at_once'

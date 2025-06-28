@@ -682,7 +682,7 @@ class EnterpriseBlackBeltAdapter:
             
             # Call Claude API
             response = self.claude_client.messages.create(
-                model="claude-3-sonnet-20240229",
+                model="claude-3-opus-20240229",
                 max_tokens=2000,
                 messages=[{
                     "role": "user",

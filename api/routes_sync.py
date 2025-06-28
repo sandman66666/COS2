@@ -1700,7 +1700,7 @@ def build_knowledge_tree():
                     'relationships_analyzed': stats.get('relationships_analyzed', 0),
                     'business_domains': stats.get('business_domains', 0),
                     'timeline_events': stats.get('timeline_events', 0),
-                    'system_version': result.get('claude_metadata', {}).get('model_used', 'claude-3-sonnet'),
+                    'system_version': result.get('claude_metadata', {}).get('model_used', 'claude-3-opus'),
                     'processing_method': 'claude_content_consolidation'
                 }
                 

@@ -598,11 +598,11 @@ class StrategicAnalysisSystem:
                 
                 response = await asyncio.to_thread(
                     self.claude_client.messages.create,
-                    model="claude-3-5-sonnet-20241022",  # Use correct Claude model name
+                    model="claude-3-opus-20240229",  # Use Claude 3 Opus for maximum intelligence
                     max_tokens=4000,
                     temperature=0.1,
                     messages=[{
-                        "role": "user",
+                        "role": "user", 
                         "content": prompt
                     }]
                 )
