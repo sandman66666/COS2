@@ -159,55 +159,35 @@ def sanity_fast_test():
             step3_start = datetime.utcnow()
             
             try:
-                # Initialize enrichment service in LIGHTWEIGHT mode for fast testing
+                # Initialize enrichment service and run actual enrichment
                 enrichment_service = ContactEnrichmentService(user_id)
                 
-                # Ultra-fast enrichment with minimal scraping
-                enriched_contacts = []
-                for contact in sample_contacts:
-                    try:
-                        # Quick enrichment with 5-second timeout per contact
-                        contact_dict = {
-                            'id': contact.get('id'),
-                            'email': contact.get('email'),
-                            'name': contact.get('name'),
-                            'domain': contact.get('domain')
-                        }
-                        
-                        # ULTRA-LIGHTWEIGHT enrichment - just basic web lookup
-                        result = await asyncio.wait_for(
-                            enrichment_service.enrich_contact_lightweight(contact_dict),
-                            timeout=5.0  # 5 second timeout per contact
-                        )
-                        
-                        enriched_contacts.append({
-                            'contact': contact_dict,
-                            'enrichment': result if result else {'status': 'timeout'}
-                        })
-                        
-                    except asyncio.TimeoutError:
-                        enriched_contacts.append({
-                            'contact': contact_dict,
-                            'enrichment': {'status': 'timeout', 'message': 'Fast test - timed out after 5s'}
-                        })
-                    except Exception as e:
-                        enriched_contacts.append({
-                            'contact': contact_dict,
-                            'enrichment': {'status': 'error', 'message': str(e)[:100]}
-                        })
+                # Run enrichment with timeout
+                enrichment_results = await asyncio.wait_for(
+                    enrichment_service.enrich_contacts_batch(
+                        contacts=sample_contacts,
+                        user_emails=sample_emails
+                    ),
+                    timeout=8.0  # 8 second timeout for enrichment
+                )
                         
                 step3_duration = (datetime.utcnow() - step3_start).total_seconds()
                 test_results['steps_completed'].append('augment_contacts')
                 test_results['test_data']['enrichment_results'] = {
-                    'total_processed': len(enriched_contacts),
-                    'successful_count': len([c for c in enriched_contacts if c['enrichment'].get('success', False)]),
-                    'failed_count': len([c for c in enriched_contacts if not c['enrichment'].get('success', False)]),
-                    'success_rate': len([c for c in enriched_contacts if c['enrichment'].get('success', False)]) / len(enriched_contacts) if len(enriched_contacts) > 0 else 0,
-                    'enriched_contacts': [c['enrichment'] for c in enriched_contacts if c['enrichment'].get('success', False)]
+                    'total_processed': enrichment_results.get('total_processed', 0),
+                    'successful_count': enrichment_results.get('successful_count', 0),
+                    'failed_count': enrichment_results.get('failed_count', 0),
+                    'success_rate': enrichment_results.get('success_rate', 0.0),
+                    'sample_enriched': str(enrichment_results)[:300] if enrichment_results else "No results"
                 }
                 test_results['performance_metrics']['step3_enrichment_duration'] = step3_duration
                 
-                logger.info(f"✅ Step 3 complete: Enriched {len(enriched_contacts)} contacts in {step3_duration:.2f}s")
+                logger.info(f"✅ Step 3 complete: Enriched {enrichment_results.get('successful_count', 0)}/{enrichment_results.get('total_processed', 0)} contacts in {step3_duration:.2f}s")
+                
+            except asyncio.TimeoutError:
+                step3_duration = (datetime.utcnow() - step3_start).total_seconds()
+                test_results['errors'].append('Contact enrichment timeout after 8s - normal for fast test')
+                logger.info("⏰ Step 3 timeout: Normal for fast test")
                 
             except Exception as e:
                 step3_duration = (datetime.utcnow() - step3_start).total_seconds()
@@ -219,24 +199,27 @@ def sanity_fast_test():
             step4_start = datetime.utcnow()
             
             try:
-                # Initialize knowledge tree with ultra-minimal settings
+                # Initialize knowledge tree orchestrator
                 knowledge_orchestrator = KnowledgeTreeOrchestrator(user_id)
+                
+                # Get user email for knowledge tree
+                user_email = session.get('user_id', 'test@session-42.com')
                 
                 # Quick knowledge tree with timeout
                 tree_result = await asyncio.wait_for(
-                    knowledge_orchestrator.build_lightweight_tree(
-                        max_nodes=5,  # Minimal nodes for speed
-                        max_depth=2   # Shallow tree
+                    knowledge_orchestrator.build_complete_knowledge_tree(
+                        user_email=user_email,
+                        max_topics=3,  # Limit topics for speed
+                        max_depth=2    # Shallow tree
                     ),
-                    timeout=8.0  # 8 second timeout
+                    timeout=6.0  # 6 second timeout
                 )
                 
                 step4_duration = (datetime.utcnow() - step4_start).total_seconds()
                 test_results['steps_completed'].append('build_knowledge_tree')
                 test_results['test_data']['knowledge_tree'] = {
-                    'success': tree_result.get('success', False),
-                    'nodes_created': tree_result.get('nodes_created', 0),
-                    'relationships_mapped': tree_result.get('relationships_mapped', 0),
+                    'success': tree_result.get('success', False) if tree_result else False,
+                    'nodes_created': tree_result.get('topics_created', 0) if tree_result else 0,
                     'tree_summary': str(tree_result)[:200] if tree_result else "Empty"
                 }
                 test_results['performance_metrics']['step4_tree_duration'] = step4_duration
@@ -245,7 +228,7 @@ def sanity_fast_test():
                 
             except asyncio.TimeoutError:
                 step4_duration = (datetime.utcnow() - step4_start).total_seconds()
-                test_results['errors'].append('Timeout after 8s - normal for fast test')
+                test_results['errors'].append('Knowledge tree timeout after 6s - normal for fast test')
                 logger.info("⏰ Step 4 timeout: Normal for fast test")
                 
             except Exception as e:
@@ -263,9 +246,9 @@ def sanity_fast_test():
                 
                 # Quick strategic analysis with timeout
                 analysis_result = await asyncio.wait_for(
-                    strategic_analyzer.quick_strategic_summary(
-                        contact_count=len(sample_contacts),
-                        email_count=len(sample_emails)
+                    strategic_analyzer.analyze_strategic_intelligence(
+                        user_id=user_id,
+                        limit_insights=3  # Limit insights for speed
                     ),
                     timeout=5.0  # 5 second timeout
                 )
@@ -273,9 +256,8 @@ def sanity_fast_test():
                 step5_duration = (datetime.utcnow() - step5_start).total_seconds()
                 test_results['steps_completed'].append('strategic_analysis')
                 test_results['test_data']['strategic_analysis'] = {
-                    'success': analysis_result.get('success', False),
-                    'insights_generated': analysis_result.get('insights_generated', 0),
-                    'strategic_recommendations': analysis_result.get('strategic_recommendations', [])[:3],  # Limit output
+                    'success': bool(analysis_result) if analysis_result else False,
+                    'insights_generated': len(analysis_result) if isinstance(analysis_result, list) else 0,
                     'analysis_summary': str(analysis_result)[:300] if analysis_result else "No analysis"
                 }
                 test_results['performance_metrics']['step5_analysis_duration'] = step5_duration
@@ -284,7 +266,7 @@ def sanity_fast_test():
                 
             except asyncio.TimeoutError:
                 step5_duration = (datetime.utcnow() - step5_start).total_seconds()
-                test_results['errors'].append('Timeout after 5s - normal for fast test')
+                test_results['errors'].append('Strategic analysis timeout after 5s - normal for fast test')
                 logger.info("⏰ Step 5 timeout: Normal for fast test")
                 
             except Exception as e:
