@@ -444,7 +444,7 @@ class ContactEnrichmentService:
                                     'total_processed': processed_contacts,
                                     'successful_count': successful_count,
                                     'failed_count': len(failed_contacts),
-                                    'success_rate': (successful_count / max(1, self.total_contacts_processed)) * 100,
+                                    'success_rate': (successful_count / max(1, self.validator.total_contacts_processed)) * 100,
                                     'system_failure': True,
                                     'failure_reason': diagnosis,
                                     'failure_details': system_status,
