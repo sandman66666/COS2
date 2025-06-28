@@ -776,7 +776,7 @@ class BlackBeltWebIntelligence:
             """
             
             response = await client.messages.create(
-                model="claude-3-opus-20240229",
+                model="claude-opus-4-20250514",
                 max_tokens=3000,
                 messages=[{"role": "user", "content": prompt}]
             )

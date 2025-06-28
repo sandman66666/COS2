@@ -598,7 +598,7 @@ class StrategicAnalysisSystem:
                 
                 response = await asyncio.to_thread(
                     self.claude_client.messages.create,
-                    model="claude-3-opus-20240229",  # Use Claude 3 Opus for maximum intelligence
+                    model="claude-opus-4-20250514",  # Use Claude 4 Opus
                     max_tokens=4000,
                     temperature=0.1,
                     messages=[{
