@@ -29,3 +29,4 @@ asyncpg==0.29.0
 cloudscraper==1.2.71
 fake-useragent==1.5.1
 requests==2.32.4
+requests-toolbelt==1.0.0

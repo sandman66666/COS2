@@ -72,4 +72,5 @@ neo4j==5.28.1
 playwright==1.52.0
 pyee==13.0.0
 cloudscraper==1.2.71
-fake-useragent==1.5.1 
+fake-useragent==1.5.1
+requests-toolbelt==1.0.0 
