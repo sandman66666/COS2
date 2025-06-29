@@ -205,12 +205,11 @@ def sanity_fast_test():
                 # Get user email for knowledge tree
                 user_email = session.get('user_id', 'test@session-42.com')
                 
-                # Quick knowledge tree with timeout
+                # Quick knowledge tree with timeout - using correct parameters
                 tree_result = await asyncio.wait_for(
                     knowledge_orchestrator.build_complete_knowledge_tree(
-                        user_email=user_email,
-                        max_topics=3,  # Limit topics for speed
-                        max_depth=2    # Shallow tree
+                        user_email=user_email
+                        # Note: force_rebuild defaults to False for fast test
                     ),
                     timeout=6.0  # 6 second timeout
                 )
@@ -219,7 +218,7 @@ def sanity_fast_test():
                 test_results['steps_completed'].append('build_knowledge_tree')
                 test_results['test_data']['knowledge_tree'] = {
                     'success': tree_result.get('success', False) if tree_result else False,
-                    'nodes_created': tree_result.get('topics_created', 0) if tree_result else 0,
+                    'nodes_created': len(tree_result.get('knowledge_tree', {}).get('topics', {})) if tree_result else 0,
                     'tree_summary': str(tree_result)[:200] if tree_result else "Empty"
                 }
                 test_results['performance_metrics']['step4_tree_duration'] = step4_duration
@@ -244,11 +243,24 @@ def sanity_fast_test():
                 # Initialize strategic analyzer
                 strategic_analyzer = StrategicAnalysisSystem(user_id)
                 
-                # Quick strategic analysis with timeout
+                # Create minimal context for strategic analysis
+                minimal_context = {
+                    'established_contacts': [],
+                    'attempted_contacts': [],
+                    'high_priority_topics': [],
+                    'all_topics': [],
+                    'all_contacts': [],
+                    'business_domains': {},
+                    'total_contacts': len(sample_contacts),
+                    'engagement_rate': 0.5
+                }
+                
+                # Quick strategic analysis using analyze_strategic_intelligence_from_tree with timeout
                 analysis_result = await asyncio.wait_for(
-                    strategic_analyzer.analyze_strategic_intelligence(
+                    strategic_analyzer.analyze_strategic_intelligence_from_tree(
                         user_id=user_id,
-                        limit_insights=3  # Limit insights for speed
+                        knowledge_tree=None,  # Minimal knowledge tree for test
+                        tree_context=minimal_context
                     ),
                     timeout=5.0  # 5 second timeout
                 )
@@ -257,7 +269,7 @@ def sanity_fast_test():
                 test_results['steps_completed'].append('strategic_analysis')
                 test_results['test_data']['strategic_analysis'] = {
                     'success': bool(analysis_result) if analysis_result else False,
-                    'insights_generated': len(analysis_result) if isinstance(analysis_result, list) else 0,
+                    'insights_generated': analysis_result.get('total_insights', 0) if analysis_result else 0,
                     'analysis_summary': str(analysis_result)[:300] if analysis_result else "No analysis"
                 }
                 test_results['performance_metrics']['step5_analysis_duration'] = step5_duration
