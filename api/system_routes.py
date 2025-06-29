@@ -199,8 +199,12 @@ def sanity_fast_test():
             step4_start = datetime.utcnow()
             
             try:
-                # Initialize knowledge tree orchestrator
-                knowledge_orchestrator = KnowledgeTreeOrchestrator(user_id)
+                # Initialize knowledge tree orchestrator with API key, not user_id
+                claude_api_key = os.getenv('ANTHROPIC_API_KEY')
+                if not claude_api_key:
+                    raise Exception("ANTHROPIC_API_KEY not found in environment")
+                    
+                knowledge_orchestrator = KnowledgeTreeOrchestrator(claude_api_key)
                 
                 # Get user email for knowledge tree
                 user_email = session.get('user_id', 'test@session-42.com')
@@ -240,8 +244,12 @@ def sanity_fast_test():
             step5_start = datetime.utcnow()
             
             try:
-                # Initialize strategic analyzer
-                strategic_analyzer = StrategicAnalysisSystem(user_id)
+                # Initialize strategic analyzer with API key, not user_id
+                claude_api_key = os.getenv('ANTHROPIC_API_KEY')
+                if not claude_api_key:
+                    raise Exception("ANTHROPIC_API_KEY not found in environment")
+                    
+                strategic_analyzer = StrategicAnalysisSystem(claude_api_key)
                 
                 # Create minimal context for strategic analysis
                 minimal_context = {
@@ -292,20 +300,93 @@ def sanity_fast_test():
             test_results['total_duration'] = total_duration
             test_results['performance_metrics']['total_test_duration'] = total_duration
             
-            # Generate summary
+            # Generate comprehensive progress summary
             steps_completed = len(test_results['steps_completed'])
             total_steps = 5
             success_rate = (steps_completed / total_steps) * 100
             
+            # Generate detailed step logs
+            step_logs = []
+            step_details = [
+                {
+                    'step': 1,
+                    'name': 'Get Sample Contacts',
+                    'description': 'Fetch 2 contacts from database with highest frequency',
+                    'completed': 'get_contacts' in test_results['steps_completed'],
+                    'duration': test_results['performance_metrics'].get('step1_contacts_duration', 0),
+                    'result': f"Found {len(test_results['test_data'].get('sample_contacts', []))} contacts" if test_results['test_data'].get('sample_contacts') else "No contacts found"
+                },
+                {
+                    'step': 2,
+                    'name': 'Get Related Emails',
+                    'description': 'Fetch emails from/to the sample contacts',
+                    'completed': 'get_emails' in test_results['steps_completed'],
+                    'duration': test_results['performance_metrics'].get('step2_emails_duration', 0),
+                    'result': f"Found {len(test_results['test_data'].get('sample_emails', []))} related emails" if test_results['test_data'].get('sample_emails') else "No emails found"
+                },
+                {
+                    'step': 3,
+                    'name': 'Contact Enrichment',
+                    'description': 'Run enterprise-grade contact augmentation with Claude 4 Opus',
+                    'completed': 'augment_contacts' in test_results['steps_completed'],
+                    'duration': test_results['performance_metrics'].get('step3_enrichment_duration', 0),
+                    'result': f"Processed {test_results['test_data'].get('enrichment_results', {}).get('total_processed', 0)} contacts" if test_results['test_data'].get('enrichment_results') else "Enrichment timeout"
+                },
+                {
+                    'step': 4,
+                    'name': 'Knowledge Tree Building',
+                    'description': 'Build comprehensive knowledge tree from email content',
+                    'completed': 'build_knowledge_tree' in test_results['steps_completed'],
+                    'duration': test_results['performance_metrics'].get('step4_tree_duration', 0),
+                    'result': f"Created {test_results['test_data'].get('knowledge_tree', {}).get('nodes_created', 0)} knowledge nodes" if test_results['test_data'].get('knowledge_tree') else "Knowledge tree timeout"
+                },
+                {
+                    'step': 5,
+                    'name': 'Strategic Intelligence',
+                    'description': 'Generate strategic insights and business opportunities',
+                    'completed': 'strategic_analysis' in test_results['steps_completed'],
+                    'duration': test_results['performance_metrics'].get('step5_analysis_duration', 0),
+                    'result': f"Generated {test_results['test_data'].get('strategic_analysis', {}).get('insights_generated', 0)} strategic insights" if test_results['test_data'].get('strategic_analysis') else "Strategic analysis timeout"
+                }
+            ]
+            
+            # Create step logs with detailed information
+            for step_detail in step_details:
+                status = "✅ Completed" if step_detail['completed'] else ("⏰ Timeout" if step_detail['step'] > 2 else "❌ Failed")
+                step_logs.append({
+                    'step': step_detail['step'],
+                    'name': step_detail['name'],
+                    'description': step_detail['description'],
+                    'status': status,
+                    'duration': f"{step_detail['duration']:.2f}s",
+                    'result': step_detail['result'],
+                    'completed': step_detail['completed']
+                })
+            
+            test_results['step_logs'] = step_logs
             test_results['summary'] = f"Completed {steps_completed}/{total_steps} steps ({success_rate:.0f}%) in {total_duration:.1f}s"
+            
+            # Add detailed recommendations
+            if steps_completed == total_steps:
+                test_results['recommendation'] = "🎉 All systems operational! Your intelligence pipeline is working perfectly."
+                test_results['health_status'] = "excellent"
+            elif steps_completed >= 3:
+                test_results['recommendation'] = "✅ Core systems working well. Some advanced features may need optimization."
+                test_results['health_status'] = "good"
+            elif steps_completed >= 2:
+                test_results['recommendation'] = "⚠️ Basic data retrieval working. Advanced intelligence features need attention."
+                test_results['health_status'] = "fair"
+            else:
+                test_results['recommendation'] = "❌ Critical issues detected. Check authentication and database connectivity."
+                test_results['health_status'] = "poor"
             
             if test_results['errors']:
                 test_results['summary'] += f" with {len(test_results['errors'])} errors"
-                test_results['success'] = False
+                test_results['success'] = len(test_results['errors']) == 0
             
             logger.info(f"🧪 Sanity Fast Test complete: {test_results['summary']}")
             
-            return test_results, 200
+            return test_results
             
         except Exception as e:
             logger.error(f"🧪 Sanity Fast Test failed: {str(e)}")
